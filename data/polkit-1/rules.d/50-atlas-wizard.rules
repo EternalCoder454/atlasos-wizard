@@ -14,16 +14,20 @@
 // after them, so that action alone stays open; the helper itself refuses
 // anything but the end of a finished setup then (state "finish" = "done").
 var atlasWizardMarkers = [
-    "/etc/atlasos/setup-done",
-    "/etc/plasma-setup-done"
+    ["/etc/atlasos", "/etc/atlasos/setup-done"],
+    ["/etc", "/etc/plasma-setup-done"]
 ];
 
-// True only when polkit.spawn confirms that no marker exists. spawn throws on
-// a non-zero exit (a marker exists) and when it cannot run: both are "no".
+// True only when polkit.spawn confirms that no marker exists. The test also
+// needs the marker's parent directory to exist ("-d"): a plain `! -e` is true
+// when stat fails (EACCES, SELinux), which would read as "no marker".
+// (tmpfiles.d creates /etc/atlasos.) spawn throws on a non-zero exit (a marker
+// exists, or the parent is missing) and when it cannot run: all are "no".
 function atlasWizardSetupOpen() {
     for (var i = 0; i < atlasWizardMarkers.length; i++) {
         try {
-            polkit.spawn(["/usr/bin/test", "!", "-e", atlasWizardMarkers[i]]);
+            polkit.spawn(["/usr/bin/test", "-d", atlasWizardMarkers[i][0],
+                          "-a", "!", "-e", atlasWizardMarkers[i][1]]);
         } catch (e) {
             return false;
         }

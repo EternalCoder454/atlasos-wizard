@@ -951,13 +951,16 @@ async fn a_uid_outside_the_human_range_is_refused_and_left_half_made() {
 }
 
 #[tokio::test]
-async fn give_up_is_refused_once_an_account_exists_or_finish_has_begun() {
+async fn give_up_with_an_account_or_a_finish_under_way_starts_the_fallback() {
+    // the fallback finishes without asking; refusing would strand the machine
     let r = rig();
     r.create("ada", false).await.unwrap();
-    let (k, c) = code(r.core.give_up().await);
-    assert_eq!((k, c.as_str()), (Kind::Invalid, "account-exists"));
-    assert!(!r.state().gave_up);
-    assert!(r.systemd.log.lock().unwrap().is_empty());
+    r.core.give_up().await.unwrap();
+    assert!(r.state().gave_up);
+    assert_eq!(
+        *r.systemd.log.lock().unwrap(),
+        vec!["start atlas-wizard-fallback.service".to_string()]
+    );
 
     let r = rig();
     let st = State {
@@ -965,7 +968,11 @@ async fn give_up_is_refused_once_an_account_exists_or_finish_has_begun() {
         ..State::default()
     };
     st.save(&r.core.paths().state()).unwrap();
-    assert_eq!(code(r.core.give_up().await).1, "account-exists");
+    r.core.give_up().await.unwrap();
+    assert_eq!(
+        *r.systemd.log.lock().unwrap(),
+        vec!["start atlas-wizard-fallback.service".to_string()]
+    );
 
     // a half-made account is still fine to give up on
     let r = rig();

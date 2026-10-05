@@ -135,7 +135,7 @@ impl Core {
     }
 
     fn setup_done(&self) -> bool {
-        markers::is_done(self.paths.root())
+        markers::is_done_or_unknown(self.paths.root())
     }
 
     fn account_stage(
@@ -623,19 +623,17 @@ impl Core {
             return Err(HelperError::setup_done());
         }
         let mut st = self.load_state()?;
-        // a made account, or a Finish under way, must not be walked over by
-        // the text-mode fallback (which would add a second account)
+        // A made account, or a Finish under way, is fine: the text-mode
+        // fallback finishes without asking when an account exists, and
+        // refusing here would strand the machine (the session script calls
+        // GiveUp after 3 failed starts and the fallback would never run).
         if st.finish.is_some()
             || st
                 .account
                 .as_ref()
                 .is_some_and(|a| a.stage == Stage::Verified)
         {
-            log::warn!("GiveUp: an account already exists");
-            return Err(HelperError::invalid(
-                "account-exists",
-                "An account was already created.",
-            ));
+            log::warn!("GiveUp: an account exists; the fallback will finish without asking");
         }
         st.gave_up = true;
         self.save_state(&st)?;

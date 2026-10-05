@@ -1,7 +1,8 @@
 #!/bin/sh
 # The setup session (plasmalogin autologin, atlas-wizard.desktop): KWin alone
 # with the wizard as its only client. Counts starts that did not end well this
-# boot; at 3 it asks the helper to give up (the text-mode fallback takes over).
+# boot; at 3 it asks the helper to give up (the text-mode fallback takes over). If
+# that fails it logs, waits and exits non-zero; on SetupDone it calls EndSetup.
 
 dir=/run/atlas-setup
 counter=$dir/session-failures
@@ -20,9 +21,28 @@ write_count() {
 }
 
 if [ "$failures" -ge 3 ]; then
-    busctl --system call net.eterneon.atlas.WizardHelper \
-        /net/eterneon/atlas/WizardHelper net.eterneon.atlas.WizardHelper1 GiveUp
-    exit 0
+    err=$(busctl --system call net.eterneon.atlas.WizardHelper \
+        /net/eterneon/atlas/WizardHelper net.eterneon.atlas.WizardHelper1 GiveUp 2>&1)
+    rc=$?
+    if [ "$rc" -eq 0 ]; then
+        exit 0
+    fi
+    case $err in
+    *SetupDone*)
+        # Setup finished meanwhile: EndSetup reruns the clean-up and restarts
+        # the display manager.
+        if busctl --system call net.eterneon.atlas.WizardHelper \
+            /net/eterneon/atlas/WizardHelper net.eterneon.atlas.WizardHelper1 EndSetup \
+            >/dev/null 2>&1; then
+            exit 0
+        fi
+        err="EndSetup failed after SetupDone: $err"
+        ;;
+    esac
+    logger -t atlas-wizard-session "GiveUp failed (busctl exit $rc): $err" 2>/dev/null
+    # Wait before failing, so a restart loop cannot spin.
+    sleep 5
+    exit 1
 fi
 
 # Counted before the start; reset below when the wizard exits cleanly.

@@ -302,6 +302,22 @@ pub fn run(paths: &Paths, run: &dyn Runner, con: &mut dyn Console) -> Outcome {
         }
     }
 
+    // The state itself says an account was made and verified, or Finish had
+    // begun: finish without asking, even when passwd cannot be read or shows
+    // no human account. Never ask for a second account.
+    if state.finish.is_some()
+        || state
+            .account
+            .as_ref()
+            .is_some_and(|a| a.stage == Stage::Verified)
+    {
+        log::info!("the state records a made account; finishing without asking");
+        con.say(text::ALREADY_SET_UP);
+        finish(paths, run, &mut state);
+        start_display_manager(run);
+        return Outcome::Done;
+    }
+
     // An account exists (made by the helper before it gave up, or by
     // Anaconda): one account per first run, so finish instead of asking.
     match accounts::human_accounts(paths.root()) {
@@ -538,6 +554,31 @@ mod tests {
         assert_eq!(run(&p, &f, &mut c), Outcome::Done);
         assert!(c.prompts.is_empty());
         assert!(markers::present(p.root()).both());
+    }
+
+    #[test]
+    fn a_verified_state_account_finishes_without_asking_even_without_passwd_entry() {
+        let (_t, p) = root();
+        // passwd shows no human account (the file is the bare fixture)
+        State {
+            account: Some(Account {
+                name: "ada".into(),
+                uid: 1000,
+                stage: Stage::Verified,
+            }),
+            ..State::default()
+        }
+        .save(&p.state_file())
+        .unwrap();
+        let f = Fake::new(&p);
+        let mut c = Script::new(vec![]);
+        assert_eq!(run(&p, &f, &mut c), Outcome::Done);
+        assert!(c.prompts.is_empty(), "never asks for a second account");
+        assert!(markers::present(p.root()).both());
+        assert!(
+            f.calls()
+                .contains(&"/usr/bin/systemctl start --no-block display-manager.service".into())
+        );
     }
 
     #[test]

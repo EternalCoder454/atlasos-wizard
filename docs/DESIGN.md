@@ -37,7 +37,7 @@ docs/                           this file, the image hand-over
 |---|---|---|
 | `/usr/libexec/atlas-wizard-boot prepare` | root, `atlas-wizard-boot.service`, every boot before the display manager | Reads the state and the system, decides (table below), writes or removes the setup autologin, cleans up and locks `atlas-setup` once setup is done. Fast: a few stats when done. |
 | `/usr/libexec/atlas-wizard-boot fallback` | root, `atlas-wizard-fallback.service` on tty1 | Text-mode account creation, when the GUI cannot run. |
-| `/usr/libexec/atlas-wizard-session` | `atlas-setup`, the plasmalogin autologin session `atlas-wizard` | Starts `kwin_wayland` with only the wizard, the screen reader's bus, the on-screen keyboard. Counts failed starts this boot in `/run/atlas-setup/session-failures`; at 3 it calls the helper's `GiveUp`. |
+| `/usr/libexec/atlas-wizard-session` | `atlas-setup`, the plasmalogin autologin session `atlas-wizard` | Starts `kwin_wayland` with only the wizard, the screen reader's bus, the on-screen keyboard. Counts failed starts this boot in `/run/atlas-setup/session-failures`; at 3 it calls the helper's `GiveUp`. If that fails: on `SetupDone` it calls `EndSetup` (clean-up again, display manager restart); on any other failure it logs with `logger -t atlas-wizard-session`, sleeps 5 s and exits non-zero, so a restart loop cannot spin. |
 | `/usr/bin/atlas-wizard` | `atlas-setup` | The setup pages. |
 | `/usr/bin/atlas-wizard --welcome` | the signed-in user, XDG autostart | First-login extras: fingerprint, PIN. |
 | `/usr/libexec/atlas-wizard-helper` | root, D-Bus activated (`atlas-wizard-helper.service`, `Type=dbus`), exits after 30 s idle | The only privileged code the GUI reaches. |
@@ -120,7 +120,7 @@ and shows its own translated text for the code.
 | `CreateAccount(s name, s full_name, ay password, b autologin) -> u uid` | `net.eterneon.atlas.wizard.create-account` | AccountsService `CreateUser(name, full_name, 1)` (administrator: wheel), then `SetPassword(yescrypt hash, "")` with the hash made in the helper. State stages `creating`, `created`, `password-set`, `verified` are written before and after each step. Verifies the passwd entry, the shadow hash, wheel, and the home owned by the uid. One account per first run: a second call fails unless the state names a half-made account, which is deleted first (only that uid, only when its home holds nothing but skel; a `creating` stage, which has no uid yet, is deleted by name only when its uid is 1000..=60000, its shadow hash is absent, locked or empty and its home is skel-only, else `half-made-account-unclear`). A uid outside 1000..=60000 from `CreateUser` is refused (`accounts-bad-uid`) and the state stays `creating`. The helper zeroes its own copies of the password; it cannot zero zbus's message buffers, which is why core dumps are disabled (`PR_SET_DUMPABLE`, `LimitCORE=0`). |
 | `Finish(a{sv} choices)` | `net.eterneon.atlas.wizard.finish` | Writes the new account's settings as that user (below), the autologin drop-in if asked, then the done markers, removes the setup autologin, locks `atlas-setup`. Idempotent: a repeat after a crash finishes the remaining steps (state `finish`: `settings`, `autologin`, `markers`, `done`; once the markers exist only the clean-up is redone, and its failures are logged, not returned, since `prepare` redoes it at the next boot). |
 | `EndSetup()` | `net.eterneon.atlas.wizard.finish` | Verifies the clean-up (the setup autologin drop-in is absent, `atlas-setup`'s shadow expire field is 0 or a past day, its shell is `/usr/sbin/nologin`), redoing it once if not and failing with `cleanup-incomplete` without restarting if it still is not; then restarts `display-manager.service` (systemd D-Bus, fixed unit). Repeatable. |
-| `GiveUp()` | `net.eterneon.atlas.wizard.fallback` | Records it in the state, removes the setup autologin, starts `atlas-wizard-fallback.service`. Refused with `Invalid` `account-exists` once the state's account is `verified` or `finish` is set. |
+| `GiveUp()` | `net.eterneon.atlas.wizard.fallback` | Records it in the state, removes the setup autologin, starts `atlas-wizard-fallback.service`. Not refused when the state's account is `verified` or `finish` is set: the fallback then finishes without asking (refusing would strand the machine when the wizard crashes after the account is made). Done markers, or markers that cannot be checked, give `SetupDone`. |
 
 `choices` keys (anything else is refused): `look` (`light` / `dark`),
 `accent` (`#rrggbb` from the offered list), `text_scale` (`1.0`, `1.25`,
@@ -146,8 +146,10 @@ actions above, every default `no`. `/usr/share/polkit-1/rules.d/50-atlas-wizard.
 returns YES only when `subject.user == "atlas-setup" && subject.local &&
 subject.active` and neither `/etc/atlasos/setup-done` nor
 `/etc/plasma-setup-done` exists (checked with
-`polkit.spawn(["/usr/bin/test", "!", "-e", path])`; a marker, or a spawn that
-fails, gives NO), for our three actions and these stock ones. The exception is
+`polkit.spawn(["/usr/bin/test", "-d", parent, "-a", "!", "-e", path])` with
+parent `/etc/atlasos` or `/etc`, which tmpfiles.d creates; a marker, a missing
+or unreadable parent (a failed stat), or a spawn that fails, gives NO). The
+helper likewise counts a marker it cannot stat as done, for our three actions and these stock ones. The exception is
 `net.eterneon.atlas.wizard.finish`: `Finish` writes the markers first and
 `EndSetup` uses the same action after them, so it is not subject to the marker
 check; the helper's own state checks bound it (`SetupDone` unless `finish` is
@@ -202,6 +204,7 @@ with a test per row):
 | account `verified`, `boots` ≥ 3 | finish with defaults (markers, cleanup); login screen |
 | `gave_up`, `boots` ≥ 3 with no account, or `atlas.wizard=fallback` | start `atlas-wizard-fallback.service` (text mode); no setup autologin |
 | otherwise | setup autologin, `boots` + 1 |
+| account made (`verified`), then the wizard crashes 3 times in one boot | the session script calls `GiveUp` (allowed); the fallback starts, sees the verified account (or `finish`) and finishes without asking, even if passwd lookup shows nothing; login screen |
 
 Details of the table (`wizard_core::boot`):
 

@@ -71,6 +71,15 @@ pub fn is_done(root: &Path) -> bool {
     present(root).any()
 }
 
+/// Fail-closed `is_done` for the root helper: setup counts as done when a
+/// marker exists, and also when a marker cannot be checked (`try_exists`
+/// fails: EACCES, SELinux, I/O error), so a stat failure never reopens setup.
+pub fn is_done_or_unknown(root: &Path) -> bool {
+    [atlas_path(root), plasma_path(root)]
+        .iter()
+        .any(|p| p.try_exists().unwrap_or(true))
+}
+
 /// Writes (replaces) `/etc/atlasos/setup-done`, atomically, mode 0644.
 ///
 /// # Errors

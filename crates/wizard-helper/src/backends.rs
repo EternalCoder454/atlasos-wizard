@@ -433,24 +433,28 @@ impl SettingsApplier for ChildApplier {
                 child.wait().await
             };
             let waited = tokio::time::timeout(CHILD_TIMEOUT, run).await;
+            // the capped, escaped text: debug when the child succeeded, and
+            // on the error line (warn) when it failed or timed out
+            let mut child_stderr = String::new();
             if let Some(reader) = stderr {
                 let abort = reader.abort_handle();
                 match tokio::time::timeout(STDERR_GRACE, reader).await {
                     Ok(Ok((kept, dropped))) if !kept.is_empty() => {
-                        log::debug!(
-                            "settings child (uid {}) stderr: {}",
-                            req.uid,
-                            stderr_for_log(&kept, dropped)
-                        );
+                        child_stderr = stderr_for_log(&kept, dropped);
                     }
                     Ok(_) => {}
                     Err(_) => abort.abort(),
                 }
             }
             match waited {
-                Ok(Ok(status)) if status.success() => Ok(()),
+                Ok(Ok(status)) if status.success() => {
+                    if !child_stderr.is_empty() {
+                        log::debug!("settings child (uid {}) stderr: {child_stderr}", req.uid);
+                    }
+                    Ok(())
+                }
                 Ok(Ok(status)) => {
-                    log::error!("the settings child exited with {status}");
+                    log::warn!("the settings child exited with {status}; stderr: {child_stderr}");
                     Err(fail(
                         "settings-failed",
                         "Could not write the account's settings.",
@@ -464,7 +468,9 @@ impl SettingsApplier for ChildApplier {
                     ))
                 }
                 Err(_) => {
-                    log::error!("the settings child ran over {CHILD_TIMEOUT:?}; killing it");
+                    log::warn!(
+                        "the settings child ran over {CHILD_TIMEOUT:?}; killing it; stderr: {child_stderr}"
+                    );
                     if let Some(pgid) = pgid {
                         let _ = rustix::process::kill_process_group(
                             pgid,

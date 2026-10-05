@@ -58,17 +58,22 @@ RestrictAddressFamilies=AF_UNIX
 LimitCORE=0
 # The commands the helper runs: chage and usermod (the lock), and itself as the
 # new account (the settings child). Only these, each for a reason:
-#   CAP_CHOWN, CAP_FOWNER: chage and usermod keep the owner and mode of
-#     /etc/shadow and /etc/passwd when they rewrite them (backup and rename).
-#   CAP_DAC_OVERRIDE, CAP_DAC_READ_SEARCH: root writing /etc/shadow (mode 0000
-#     on Fedora), and reading the new home to check it.
+#   CAP_CHOWN: chage and usermod keep the owner of /etc/shadow and
+#     /etc/passwd when they rewrite them (backup and rename).
+#   CAP_FOWNER: the same rewrite keeps the mode (chmod on a file root does
+#     own, so it may be unneeded; the VM test decides, keep it until then).
+#   CAP_DAC_OVERRIDE: root writing /etc/shadow (mode 0000 on Fedora), and
+#     reading the new home to check it. (CAP_DAC_READ_SEARCH is implied by
+#     it, so it is not listed.)
 #   CAP_SETUID, CAP_SETGID: the settings child drops to the new account's uid
 #     and gid before it exec's (and std clears its supplementary groups).
 #   CAP_KILL: killing the settings child's process group after its timeout,
 #     when it runs under another uid.
-#   CAP_AUDIT_WRITE: shadow-utils write an audit record for usermod.
+# Not listed: CAP_AUDIT_WRITE (the audit record needs an AF_NETLINK socket,
+# which RestrictAddressFamilies=AF_UNIX blocks anyway; shadow-utils go on
+# without it).
 # Anything the commands need beyond these shows up as EPERM in the VM test.
-CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER CAP_SETUID CAP_SETGID CAP_KILL CAP_AUDIT_WRITE
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SETUID CAP_SETGID CAP_KILL
 UMask=0022
 # Stopping: the helper handles SIGTERM itself (refuses new calls, releases its
 # bus name, lets a running call finish). Every step it takes is recorded in
