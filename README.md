@@ -13,7 +13,8 @@ is in [docs/DESIGN.md](docs/DESIGN.md). Rules for working on it are in
 ## Build
 
 Everything builds inside the dev container (`scripts/dev.sh`; the first run
-needs `ATLAS_LOCAL_RPMS=<dir>` holding atlas-framework's RPMs).
+builds the image, atlas-ui included, from the atlas-framework tag in
+`Cargo.toml`, so it needs network).
 
 ```sh
 scripts/dev.sh cargo fmt --all --check
