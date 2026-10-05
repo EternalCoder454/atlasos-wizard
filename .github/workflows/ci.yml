@@ -114,8 +114,17 @@ jobs:
       - name: Shell scripts
         run: shellcheck scripts/*.sh ci/*.sh packaging/*.sh data/libexec/*
 
+      # Session files carry DesktopNames, which display managers read but
+      # desktop-file-validate rejects as a non-X- key: they get a key check.
       - name: Desktop files
-        run: find . -name '*.desktop' -not -path './target/*' -print0 | xargs -0 -r desktop-file-validate
+        run: |
+          find . -name '*.desktop' -not -path './target/*' -not -path '*/wayland-sessions/*' -print0 |
+            xargs -0 -r desktop-file-validate
+          for f in data/wayland-sessions/*.desktop; do
+            for key in Type=Application Name= Exec=/ DesktopNames=; do
+              grep -q "^$key" "$f" || { echo "::error file=$f::missing $key"; exit 1; }
+            done
+          done
 
   clippy:
     name: Clippy
