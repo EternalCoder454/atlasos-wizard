@@ -1,13 +1,15 @@
 #!/bin/bash
 # check-image-secrets.sh <image>: fail if the dev image could carry a secret.
 # GHCR makes an image pushed from this public repo public at once, so
-# dev-image.yml runs this before it logs in and pushes. Checks the build
+# dev-image.yml runs this before it logs in and pushes. Runs with podman
+# (CONTAINER_ENGINE to change it); fixes from atlasos-notepad 88fb5e7. Checks the build
 # history (commands and build args), the environment, and the files a secret
 # would land in: no repository or .git copied in, root's home holds only the
 # skeleton files and an empty .ssh, and no token- or key-shaped string in the
 # places a build writes to.
 set -euo pipefail
 image=${1:?usage: check-image-secrets.sh <image>}
+engine=${CONTAINER_ENGINE:-podman}
 fail=0
 bad() { echo "::error title=Secret check::$*"; fail=1; }
 
@@ -16,20 +18,35 @@ bad() { echo "::error title=Secret check::$*"; fail=1; }
 tokens='gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{60,}|AKIA[0-9A-Z]{16}|xox[abpr]-[0-9A-Za-z-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----'
 names='(TOKEN|SECRET|PASSW(OR)?D|PRIVATE|CREDENTIAL|API_?KEY|AUTH)'
 
-if podman history --no-trunc --format '{{.CreatedBy}}' "$image" | grep -E -i -e "$tokens" -e "${names}[A-Z_]*=" >&2; then
-    bad "the image history holds a token or a secret-named variable (above)"
+# Matches are reported by kind, never printed: the log of this public repo is
+# public, and GitHub masks only the secrets it knows. An engine error fails.
+if ! history=$("$engine" history --no-trunc --format '{{.CreatedBy}}' "$image"); then
+    bad "cannot read the image history"
+elif grep -qE -e "$tokens" <<<"$history"; then
+    bad "the image history holds a token-shaped string"
+elif found=$(grep -oiE "${names}[A-Z_]*=" <<<"$history" | sort -u | tr '\n' ' ') && [ -n "$found" ]; then
+    bad "the image history sets a secret-named variable: $found"
 fi
 
-if podman image inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$image" |
-    cut -d= -f1 | grep -E -i "$names" >&2; then
-    bad "the image environment has a secret-named variable (above)"
+if ! env=$("$engine" image inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$image"); then
+    bad "cannot read the image environment"
+elif grep -qE -e "$tokens" <<<"$env"; then
+    bad "the image environment holds a token-shaped string"
+elif found=$(cut -d= -f1 <<<"$env" | grep -iE "$names" | tr '\n' ' ') && [ -n "$found" ]; then
+    bad "the image environment has a secret-named variable: $found"
 fi
 
+# The work paths may exist as empty directories (BuildKit leaves the mount
+# points of RUN --mount behind); a file in them fails. Token shapes are looked
+# for where a build writes, in /atlas-rpms (binaries too, if a build leaves it
+# behind) and in every file of the atlas-* RPMs, the only packages not from
+# Fedora, which must be installed; file names only, never the matching line.
 # shellcheck disable=SC2016 # expanded inside the container
-if ! podman run --rm --network none --security-opt label=disable "$image" bash -c '
+if ! "$engine" run --rm --pull=never --network none --security-opt label=disable "$image" bash -c '
     rc=0
     for d in /src /workspace /github; do
-        [ -e "$d" ] && { echo "present: $d"; rc=1; }
+        f=$(find "$d" -mindepth 1 ! -type d 2>/dev/null | head -3)
+        [ -n "$f" ] && { echo "files under $d: $f"; rc=1; }
     done
     git_dirs=$(find / -xdev -name .git -not -path "/proc/*" 2>/dev/null | head -5)
     [ -n "$git_dirs" ] && { echo "git directories: $git_dirs"; rc=1; }
@@ -38,8 +55,22 @@ if ! podman run --rm --network none --security-opt label=disable "$image" bash -
         ! -name .cshrc ! -name .tcshrc ! -name .ssh ! -name .cache 2>/dev/null)
     [ -n "$extra" ] && { echo "unexpected in /root: $extra"; rc=1; }
     [ -n "$(ls -A /root/.ssh 2>/dev/null)" ] && { echo "/root/.ssh is not empty"; rc=1; }
-    hits=$(grep -rIlE -- "$1" /root /home /etc /opt /usr/local /tmp /var/tmp /atlas-rpms 2>/dev/null | head -5)
+    hits=$(grep -rIlE -- "$1" /root /home /etc /opt /usr/local /tmp /var/tmp \
+        /var/lib /var/log /var/cache 2>/dev/null | head -5)
     [ -n "$hits" ] && { echo "token-shaped strings in: $hits"; rc=1; }
+    hits=$(LC_ALL=C grep -ralE -- "$1" /atlas-rpms 2>/dev/null | head -5)
+    [ -n "$hits" ] && { echo "token-shaped strings in: $hits"; rc=1; }
+    if ! rpm -q atlas-ui atlas-symbols-fonts >/dev/null; then
+        echo "atlas-ui or atlas-symbols-fonts is not installed"; rc=1
+    fi
+    mapfile -t pkgs < <(rpm -qa --qf "%{NAME}\n" "atlas-*")
+    if [ "${#pkgs[@]}" -gt 0 ]; then
+        # Binaries too (-a): these are libraries and fonts.
+        hits=$(rpm -ql "${pkgs[@]}" | while IFS= read -r f; do
+            [ -f "$f" ] && ! [ -L "$f" ] && printf "%s\0" "$f"
+        done | LC_ALL=C xargs -0r grep -alE -- "$1" 2>/dev/null | head -5)
+        [ -n "$hits" ] && { echo "token-shaped strings in: $hits"; rc=1; }
+    fi
     exit $rc' _ "$tokens" >&2; then
     bad "the image files hold something that must not be published (above)"
 fi
