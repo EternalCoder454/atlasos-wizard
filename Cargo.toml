@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/wizard-core", "apps/atlas-wizard"]
+members = ["crates/wizard-core", "crates/wizard-boot", "apps/atlas-wizard"]
 
 [workspace.package]
 version = "0.1.0"
@@ -14,7 +14,11 @@ rust-version = "1.89"
 # polkit); to move the pin, see CLAUDE.md. Atlas.Ui is not pinned here: it is
 # the installed atlas-ui package.
 atlas-framework-ui = { git = "https://github.com/EternalCoder454/atlas-framework", tag = "v1.4.0" }
+atlas-framework-core = { git = "https://github.com/EternalCoder454/atlas-framework", tag = "v1.4.0" }
 atlas-framework-system = { git = "https://github.com/EternalCoder454/atlas-framework", tag = "v1.4.0" }
+libc = "0.2"
+log = { version = "0.4", features = ["std"] }
+rustix = { version = "1", default-features = false, features = ["std"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tempfile = "3"

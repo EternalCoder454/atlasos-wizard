@@ -1,0 +1,62 @@
+#!/bin/sh
+# The setup session (plasmalogin autologin, atlas-wizard.desktop): KWin alone
+# with the wizard as its only client. Counts starts that did not end well this
+# boot; at 3 it asks the helper to give up (the text-mode fallback takes over).
+
+dir=/run/atlas-setup
+counter=$dir/session-failures
+
+failures=0
+if [ -r "$counter" ]; then
+    read -r failures <"$counter" 2>/dev/null
+fi
+case $failures in
+'' | *[!0-9]*) failures=0 ;;
+esac
+
+write_count() {
+    # temp file and rename: a cut never leaves half a number
+    printf '%s\n' "$1" >"$counter.tmp" 2>/dev/null && mv -f "$counter.tmp" "$counter" 2>/dev/null
+}
+
+if [ "$failures" -ge 3 ]; then
+    busctl --system call net.eterneon.atlas.WizardHelper \
+        /net/eterneon/atlas/WizardHelper net.eterneon.atlas.WizardHelper1 GiveUp
+    exit 0
+fi
+
+# Counted before the start; reset below when the wizard exits cleanly.
+write_count $((failures + 1))
+
+XDG_SESSION_TYPE=wayland
+XDG_CURRENT_DESKTOP=KDE
+KDE_SESSION_VERSION=6
+QT_QPA_PLATFORM=wayland
+KWIN_USE_OVERLAYS=0
+export XDG_SESSION_TYPE XDG_CURRENT_DESKTOP KDE_SESSION_VERSION QT_QPA_PLATFORM KWIN_USE_OVERLAYS
+# Qt starts the accessibility bus (at-spi-bus-launcher) on demand when Orca
+# or the wizard's screen reader switch asks for it, so
+# QT_LINUX_ACCESSIBILITY_ALWAYS_ON is not set: it would start the bus on every
+# setup for nothing.
+
+# Not `exec`: the script must see how KWin ended to reset the counter.
+# The flags are the ones plasmalogin's own greeter session uses
+# (plasma-login-kwin_wayland.service), plus --exit-with-session so the session
+# ends when the wizard does.
+/usr/bin/kwin_wayland --no-lockscreen --no-global-shortcuts --no-kactivities \
+    --inputmethod plasma-keyboard --locale1 \
+    --exit-with-session /usr/bin/atlas-wizard &
+pid=$!
+# logind ends the session with SIGTERM or SIGHUP: pass it on.
+trap 'kill -TERM "$pid" 2>/dev/null' TERM HUP INT
+wait "$pid"
+status=$?
+# The trap interrupts the first wait; wait again for the real status.
+if kill -0 "$pid" 2>/dev/null; then
+    wait "$pid"
+    status=$?
+fi
+if [ "$status" -eq 0 ]; then
+    write_count 0
+fi
+exit "$status"

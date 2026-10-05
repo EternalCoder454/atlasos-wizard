@@ -1,0 +1,45 @@
+[Unit]
+Description=AtlasOS Setup: decide at boot whether setup is needed
+Documentation=https://github.com/EternalCoder454/atlasos-wizard/blob/main/docs/DESIGN.md
+# Before the login screen, so the setup autologin (or its removal) is in place
+# when plasmalogin starts.
+Before=display-manager.service plasmalogin.service
+After=systemd-sysusers.service systemd-tmpfiles-setup.service systemd-user-sessions.service
+# Not on the live ISO, which has no first-run setup.
+ConditionKernelCommandLine=!rd.live.image
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/atlas-wizard-boot prepare
+# Every external command it runs has its own 20 s limit; this is the backstop.
+TimeoutStartSec=60
+# /var/lib/atlas-wizard, created 0755 and writable.
+StateDirectory=atlas-wizard
+StateDirectoryMode=0755
+UMask=0022
+
+# It must write /etc (the setup autologin, the done markers, passwd and shadow
+# through chage and usermod), /var/lib/atlas-wizard and /run/atlas-setup, and
+# talk to systemd and logind over their sockets. Nothing else.
+ProtectSystem=strict
+ReadWritePaths=/etc -/run/atlas-setup
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateNetwork=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target
