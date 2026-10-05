@@ -19,6 +19,16 @@ fn main() -> ExitCode {
     // journal identifier: atlas-wizard-helper (stderr without a journal)
     atlas_framework_core::log::init(&app);
 
+    // No core dump, and no ptrace by the user's processes: the helper holds
+    // the password for a moment (see DESIGN.md, "The helper"), and zbus's own
+    // message buffers cannot be zeroed. Refuse to run without it.
+    if let Err(e) =
+        rustix::process::set_dumpable_behavior(rustix::process::DumpableBehavior::NotDumpable)
+    {
+        log::error!("cannot turn core dumps off: {e}");
+        return ExitCode::FAILURE;
+    }
+
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args
         .iter()

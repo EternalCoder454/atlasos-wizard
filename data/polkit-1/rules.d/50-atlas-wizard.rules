@@ -6,7 +6,31 @@
 //
 // After setup the user atlas-setup is locked (account expired, no shell) and
 // the setup autologin is removed, so it can have no session and this rule can
-// never match again.
+// never match again. As a second lock, once a done marker exists
+// (/etc/atlasos/setup-done or /etc/plasma-setup-done) the answer is NO, and
+// it is NO whenever the markers cannot be checked: the grants end with setup
+// even if the clean-up failed. The one exception is the helper's "finish"
+// action: Finish writes the markers first and EndSetup (same action) comes
+// after them, so that action alone stays open; the helper itself refuses
+// anything but the end of a finished setup then (state "finish" = "done").
+var atlasWizardMarkers = [
+    "/etc/atlasos/setup-done",
+    "/etc/plasma-setup-done"
+];
+
+// True only when polkit.spawn confirms that no marker exists. spawn throws on
+// a non-zero exit (a marker exists) and when it cannot run: both are "no".
+function atlasWizardSetupOpen() {
+    for (var i = 0; i < atlasWizardMarkers.length; i++) {
+        try {
+            polkit.spawn(["/usr/bin/test", "!", "-e", atlasWizardMarkers[i]]);
+        } catch (e) {
+            return false;
+        }
+    }
+    return true;
+}
+
 polkit.addRule(function(action, subject) {
     var granted = [
         // the helper (net.eterneon.atlas.WizardHelper)
@@ -29,6 +53,9 @@ polkit.addRule(function(action, subject) {
     ];
     if (granted.indexOf(action.id) >= 0 &&
         subject.user == "atlas-setup" && subject.local && subject.active) {
-        return polkit.Result.YES;
+        if (action.id == "net.eterneon.atlas.wizard.finish" || atlasWizardSetupOpen()) {
+            return polkit.Result.YES;
+        }
+        return polkit.Result.NO;
     }
 });

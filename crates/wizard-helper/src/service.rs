@@ -1,5 +1,5 @@
 //! The D-Bus face: `net.eterneon.atlas.WizardHelper1`, the authorization of
-//! every call (polkit, then the caller's uid), the idle exit and shutdown.
+//! every call (the caller's uid, then polkit), the idle exit and shutdown.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -106,6 +106,7 @@ impl Drop for ActivityGuard {
 pub struct Service {
     core: Arc<Core>,
     activity: Arc<Activity>,
+    denials: DenyLog,
 }
 
 impl Service {
@@ -114,6 +115,7 @@ impl Service {
         Service {
             core,
             activity: Arc::new(Activity::default()),
+            denials: DenyLog::default(),
         }
     }
 
@@ -122,8 +124,10 @@ impl Service {
         self.activity.clone()
     }
 
-    /// Counts the call, asks polkit (non-interactive), and checks that the
-    /// caller is the setup user. Everything else follows only after this.
+    /// Checks the caller's uid first (nothing else is done for anyone but the
+    /// setup user: no polkit round trip, no idle-timer reset), then counts the
+    /// call and asks polkit (non-interactive). Everything else follows only
+    /// after this.
     async fn authorize(
         &self,
         method: &str,
@@ -131,25 +135,62 @@ impl Service {
         conn: &zbus::Connection,
         action: &str,
     ) -> Result<ActivityGuard, HelperError> {
-        let guard = self.activity.enter().ok_or_else(|| {
-            HelperError::failed("shutting-down", "The helper is shutting down; try again.")
-        })?;
         let sender = header
             .sender()
             .map(ToString::to_string)
             .unwrap_or_else(|| "(none)".into());
-        log::info!("{method}: call from {sender}");
-        let r = check_caller(self.core.paths(), header, conn, action).await;
-        if let Err(e) = &r {
-            log::warn!("{method}: {e}");
+        let r = async {
+            check_uid(self.core.paths(), header, conn).await?;
+            let guard = self.activity.enter().ok_or_else(|| {
+                HelperError::failed("shutting-down", "The helper is shutting down; try again.")
+            })?;
+            check_polkit(header, conn, action).await?;
+            Ok::<_, HelperError>(guard)
         }
-        r.map(|()| guard)
+        .await;
+        match &r {
+            Ok(_) => log::info!("{method}: call from {sender}"),
+            Err(e) => self.denials.note(method, e),
+        }
+        r
     }
 }
 
-/// polkit, then the uid of the caller against `atlas-setup`'s.
-pub async fn check_caller(
-    paths: &Paths,
+/// Logs refused calls at most once a second; the rest are only counted, and
+/// the next line says how many there were. Anyone on the bus can send us
+/// calls, so the journal must not be a way to flood the disk.
+#[derive(Default)]
+struct DenyLog(Mutex<(Option<Instant>, u64)>);
+
+impl DenyLog {
+    /// What to log for a denial at `now`: `None` when it is suppressed, else
+    /// the number of denials suppressed since the last line.
+    fn admit(&self, now: Instant) -> Option<u64> {
+        let mut g = lock(&self.0);
+        match g.0 {
+            Some(last) if now.saturating_duration_since(last) < Duration::from_secs(1) => {
+                g.1 += 1;
+                None
+            }
+            _ => {
+                g.0 = Some(now);
+                Some(std::mem::take(&mut g.1))
+            }
+        }
+    }
+
+    fn note(&self, method: &str, e: &HelperError) {
+        if let Some(suppressed) = self.admit(Instant::now()) {
+            if suppressed > 0 {
+                log::warn!("{suppressed} more refused call(s) in the last seconds were not logged");
+            }
+            log::warn!("{method}: {e}");
+        }
+    }
+}
+
+/// Asks polkit about `action` for the caller, non-interactively.
+async fn check_polkit(
     header: &Header<'_>,
     conn: &zbus::Connection,
     action: &str,
@@ -168,8 +209,16 @@ pub async fn check_caller(
             Denied::NotAuthorized { .. } => {
                 HelperError::not_authorized("polkit-denied", "This action is not allowed here.")
             }
-        })?;
+        })
+}
 
+/// The caller's uid (asked of the bus daemon, never an argument) against
+/// `atlas-setup`'s.
+async fn check_uid(
+    paths: &Paths,
+    header: &Header<'_>,
+    conn: &zbus::Connection,
+) -> Result<(), HelperError> {
     let sender = header
         .sender()
         .ok_or_else(|| HelperError::not_authorized("no-sender", "The call has no sender."))?;
@@ -369,6 +418,17 @@ mod tests {
         drop(g);
         assert!(a.close_if_idle(Duration::ZERO, start));
         assert!(a.enter().is_none(), "refused once closing");
+    }
+
+    #[test]
+    fn denials_are_logged_once_a_second_and_the_rest_counted() {
+        let d = DenyLog::default();
+        let t = Instant::now();
+        assert_eq!(d.admit(t), Some(0));
+        assert_eq!(d.admit(t + Duration::from_millis(10)), None);
+        assert_eq!(d.admit(t + Duration::from_millis(900)), None);
+        assert_eq!(d.admit(t + Duration::from_millis(1000)), Some(2));
+        assert_eq!(d.admit(t + Duration::from_millis(2500)), Some(0));
     }
 
     #[test]

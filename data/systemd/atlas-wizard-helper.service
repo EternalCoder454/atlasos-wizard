@@ -8,21 +8,28 @@ BusName=net.eterneon.atlas.WizardHelper
 ExecStart=/usr/libexec/atlas-wizard-helper
 # The helper exits by itself after 30 seconds without a call.
 #
-# Sandboxed with the safe subset only. Each option left out is left out on
-# purpose, and every choice here is to be confirmed in the AtlasOS VM test:
-#   ProtectSystem, ProtectHome, ReadWritePaths, PrivateMounts: the helper writes
-#     /etc (the done markers, the autologin drop-in), /var/lib/atlas-wizard (the
-#     state) and the new account's home (through the settings child; /home is a
-#     link to /var/home on AtlasOS), and chage and usermod write /etc/shadow and
-#     /etc/passwd with lock files beside them. A strict mount sandbox would need
-#     every one of those paths proven in a VM first; all of them are fixed
-#     paths, none comes from a caller.
-#   NoNewPrivileges, RestrictSUIDSGID: chage and usermod run in their own
-#     SELinux domains, and NoNewPrivileges blocks the transition. The helper is
-#     root and gains nothing from setuid files anyway.
+# Sandboxed as far as the helper's work allows. NONE OF THIS HAS BEEN RUN FOR
+# REAL YET: every line below, and the capability list above all, must be
+# verified in the AtlasOS VM (a full CreateAccount, Finish and EndSetup with
+# the unit as shipped, then `journalctl -u atlas-wizard-helper` for EPERM and
+# `ausearch -m avc` for denials) before it is relied on. `systemd-analyze
+# security` only scores the unit; it does not prove the helper still works.
+#
+# Left out on purpose:
+#   ProtectHome, ReadWritePaths, PrivateMounts: the helper writes /etc (the
+#     done markers, the autologin drop-in), /var/lib/atlas-wizard (the state)
+#     and the new account's home (through the settings child; /home is a link
+#     to /var/home on AtlasOS), and chage and usermod write /etc/shadow and
+#     /etc/passwd with lock files beside them. All are fixed paths, none comes
+#     from a caller. ProtectSystem=yes below makes only /usr and /boot
+#     read-only; a strict mount sandbox would need every writable path proven
+#     in a VM first.
+#   NoNewPrivileges: chage and usermod run in their own SELinux domains, and
+#     NoNewPrivileges blocks the transition. (RestrictSUIDSGID is on: it only
+#     stops this service creating setuid files, which it never does. The
+#     settings child sets no_new_privs for itself.)
 #   User=, DynamicUser=: it must be root: it writes /etc and switches to the
-#     new account's uid for the settings child (it needs CAP_SETUID and
-#     CAP_SETGID, and CAP_CHOWN, CAP_DAC_OVERRIDE and CAP_FOWNER for /etc).
+#     new account's uid for the settings child.
 #   MemoryDenyWriteExecute, RestrictNamespaces, PrivateDevices: the settings
 #     child starts Qt programs (plasma-apply-lookandfeel and
 #     plasma-apply-colorscheme), and all three are inherited by them; Qt may
@@ -32,6 +39,9 @@ ExecStart=/usr/libexec/atlas-wizard-helper
 #   Creating the user: useradd runs inside AccountsService, in its own process
 #     and its own sandbox, never in this helper.
 PrivateTmp=yes
+ProtectSystem=yes
+ProtectProc=invisible
+ProcSubset=pid
 ProtectKernelModules=yes
 ProtectKernelLogs=yes
 ProtectKernelTunables=yes
@@ -40,9 +50,25 @@ ProtectClock=yes
 ProtectHostname=yes
 LockPersonality=yes
 RestrictRealtime=yes
+RestrictSUIDSGID=yes
 SystemCallArchitectures=native
 RestrictAddressFamilies=AF_UNIX
-CapabilityBoundingSet=~CAP_SYS_MODULE CAP_SYS_TIME CAP_SYS_BOOT CAP_SYS_RAWIO CAP_SYS_TTY_CONFIG CAP_WAKE_ALARM CAP_BLOCK_SUSPEND CAP_SYSLOG CAP_AUDIT_CONTROL CAP_AUDIT_READ CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE CAP_NET_BROADCAST CAP_SYS_PACCT CAP_LEASE CAP_MAC_OVERRIDE CAP_CHECKPOINT_RESTORE CAP_BPF CAP_PERFMON CAP_SYS_PTRACE CAP_SYS_ADMIN CAP_MKNOD
+# No core dump of a process that held a password (the helper also turns
+# dumpable off itself).
+LimitCORE=0
+# The commands the helper runs: chage and usermod (the lock), and itself as the
+# new account (the settings child). Only these, each for a reason:
+#   CAP_CHOWN, CAP_FOWNER: chage and usermod keep the owner and mode of
+#     /etc/shadow and /etc/passwd when they rewrite them (backup and rename).
+#   CAP_DAC_OVERRIDE, CAP_DAC_READ_SEARCH: root writing /etc/shadow (mode 0000
+#     on Fedora), and reading the new home to check it.
+#   CAP_SETUID, CAP_SETGID: the settings child drops to the new account's uid
+#     and gid before it exec's (and std clears its supplementary groups).
+#   CAP_KILL: killing the settings child's process group after its timeout,
+#     when it runs under another uid.
+#   CAP_AUDIT_WRITE: shadow-utils write an audit record for usermod.
+# Anything the commands need beyond these shows up as EPERM in the VM test.
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER CAP_SETUID CAP_SETGID CAP_KILL CAP_AUDIT_WRITE
 UMask=0022
 # Stopping: the helper handles SIGTERM itself (refuses new calls, releases its
 # bus name, lets a running call finish). Every step it takes is recorded in

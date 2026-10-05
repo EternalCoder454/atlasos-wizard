@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::time::Duration;
 
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use zbus::zvariant::OwnedObjectPath;
 
 use crate::error::HelperError;
@@ -108,6 +108,41 @@ pub const SYSTEMD_CALL_TIMEOUT: Duration = Duration::from_secs(25);
 pub const RUN_TIMEOUT: Duration = Duration::from_secs(20);
 /// Timeout of the settings child.
 pub const CHILD_TIMEOUT: Duration = Duration::from_secs(60);
+/// Most of the child's stderr that is kept (and logged).
+pub const CHILD_STDERR_MAX: usize = 4096;
+/// How long to wait for the rest of the child's stderr once it has exited
+/// (a tool it started may still hold the pipe).
+const STDERR_GRACE: Duration = Duration::from_secs(1);
+
+/// Reads at most `max` bytes of `r`, then drains and drops the rest so the
+/// writer never blocks on a full pipe. Returns the kept bytes and whether
+/// anything was dropped.
+async fn read_capped(r: impl AsyncRead + Unpin, max: usize) -> (Vec<u8>, bool) {
+    let mut kept = Vec::new();
+    let mut r = r;
+    if (&mut r)
+        .take(max as u64)
+        .read_to_end(&mut kept)
+        .await
+        .is_err()
+    {
+        return (kept, false);
+    }
+    let dropped = tokio::io::copy(&mut r, &mut tokio::io::sink())
+        .await
+        .is_ok_and(|n| n > 0);
+    (kept, dropped)
+}
+
+/// The text to put in the journal for the child's stderr: lossy UTF-8, shown
+/// escaped (one line, no control characters).
+fn stderr_for_log(kept: &[u8], dropped: bool) -> String {
+    let mut s = format!("{:?}", String::from_utf8_lossy(kept));
+    if dropped {
+        s.push_str(" (truncated)");
+    }
+    s
+}
 
 /// Describes a zbus error for the journal; the remote message is left out
 /// when `with_message` is false (calls that carry a secret).
@@ -360,7 +395,22 @@ impl SettingsApplier for ChildApplier {
                 .process_group(0)
                 .stdin(std::process::Stdio::piped())
                 .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::piped())
                 .kill_on_drop(true);
+            // Nothing the child starts (the Qt tools) may gain privileges
+            // through a setuid or file-capability binary; the plasma-apply-*
+            // tools need none.
+            #[allow(unsafe_code)]
+            // SAFETY: the closure runs between fork and exec and only makes
+            // one prctl system call, which is async-signal-safe.
+            unsafe {
+                cmd.pre_exec(|| {
+                    if libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    Ok(())
+                });
+            }
             let mut child = cmd.spawn().map_err(|e| {
                 log::error!("cannot start the settings child: {}", e.kind());
                 fail("settings-spawn", "Could not write the account's settings.")
@@ -369,6 +419,10 @@ impl SettingsApplier for ChildApplier {
                 .id()
                 .and_then(|p| rustix::process::Pid::from_raw(p as i32));
             let mut stdin = child.stdin.take();
+            let stderr = child
+                .stderr
+                .take()
+                .map(|e| tokio::spawn(read_capped(e, CHILD_STDERR_MAX)));
             let json = &req.json;
             let run = async {
                 if let Some(mut s) = stdin.take() {
@@ -378,7 +432,22 @@ impl SettingsApplier for ChildApplier {
                 }
                 child.wait().await
             };
-            match tokio::time::timeout(CHILD_TIMEOUT, run).await {
+            let waited = tokio::time::timeout(CHILD_TIMEOUT, run).await;
+            if let Some(reader) = stderr {
+                let abort = reader.abort_handle();
+                match tokio::time::timeout(STDERR_GRACE, reader).await {
+                    Ok(Ok((kept, dropped))) if !kept.is_empty() => {
+                        log::debug!(
+                            "settings child (uid {}) stderr: {}",
+                            req.uid,
+                            stderr_for_log(&kept, dropped)
+                        );
+                    }
+                    Ok(_) => {}
+                    Err(_) => abort.abort(),
+                }
+            }
+            match waited {
                 Ok(Ok(status)) if status.success() => Ok(()),
                 Ok(Ok(status)) => {
                     log::error!("the settings child exited with {status}");
@@ -410,5 +479,27 @@ impl SettingsApplier for ChildApplier {
                 }
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn stderr_is_capped_and_the_rest_drained() {
+        let big = vec![b'x'; CHILD_STDERR_MAX * 3];
+        let (kept, dropped) = read_capped(&big[..], CHILD_STDERR_MAX).await;
+        assert_eq!(kept.len(), CHILD_STDERR_MAX);
+        assert!(dropped);
+        let (kept, dropped) = read_capped(&b"short"[..], CHILD_STDERR_MAX).await;
+        assert_eq!((kept.as_slice(), dropped), (&b"short"[..], false));
+    }
+
+    #[test]
+    fn stderr_is_logged_on_one_escaped_line() {
+        let t = stderr_for_log(b"a\nb\x1b[31m", true);
+        assert!(!t.contains('\n') && !t.contains('\x1b'), "{t}");
+        assert!(t.ends_with("(truncated)"));
     }
 }

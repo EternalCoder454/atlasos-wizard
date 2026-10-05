@@ -30,6 +30,7 @@ struct FakeAccounts {
     fail_set_password: StdMutex<bool>,
     hang_create: bool,
     delay: Duration,
+    uid: u32,
 }
 
 impl FakeAccounts {
@@ -84,7 +85,7 @@ impl AccountsApi for FakeAccounts {
                 std::future::pending::<()>().await;
             }
             tokio::time::sleep(self.delay).await;
-            let uid = account_uid();
+            let uid = self.uid;
             self.edit(
                 "etc/passwd",
                 |_| true,
@@ -163,10 +164,33 @@ impl SystemdApi for FakeSystemd {
     }
 }
 
+/// Logs the commands and, like the real ones, edits the temp root's shadow
+/// (`chage -E 0`) and passwd (`usermod -s`) unless told to do nothing.
 #[derive(Default)]
 struct FakeRunner {
     log: StdMutex<Vec<String>>,
     fail: bool,
+    root: PathBuf,
+    /// Runs that do nothing at all, from the start (they still succeed).
+    ignore_first: StdMutex<usize>,
+}
+
+impl FakeRunner {
+    fn rewrite(&self, rel: &str, user: &str, f: impl Fn(&mut Vec<String>)) {
+        let p = self.root.join(rel);
+        let text = fs::read_to_string(&p).unwrap();
+        let out: Vec<String> = text
+            .lines()
+            .map(|l| {
+                let mut fields: Vec<String> = l.split(':').map(String::from).collect();
+                if fields[0] == user {
+                    f(&mut fields);
+                }
+                fields.join(":")
+            })
+            .collect();
+        fs::write(p, out.join("\n") + "\n").unwrap();
+    }
 }
 
 impl Runner for FakeRunner {
@@ -180,6 +204,26 @@ impl Runner for FakeRunner {
             .unwrap()
             .push(format!("{program} {}", args.join(" ")));
         let fail = self.fail;
+        let ignored = {
+            let mut n = self.ignore_first.lock().unwrap();
+            let ignore = *n > 0;
+            *n = n.saturating_sub(1);
+            ignore
+        };
+        if !fail && !ignored {
+            let user = args.last().copied().unwrap_or("");
+            match (program, args.first().copied()) {
+                ("/usr/bin/chage", Some("-E")) => {
+                    let day = args[1].to_string();
+                    self.rewrite("etc/shadow", user, |f| f[7] = day.clone());
+                }
+                ("/usr/sbin/usermod", Some("-s")) => {
+                    let shell = args[1].to_string();
+                    self.rewrite("etc/passwd", user, |f| f[6] = shell.clone());
+                }
+                _ => {}
+            }
+        }
         Box::pin(async move {
             if fail {
                 Err(BackendError::new("no"))
@@ -224,6 +268,8 @@ struct Opts {
     hang_create: bool,
     delay_ms: u64,
     runner_fails: bool,
+    runner_ignores: usize,
+    create_uid: Option<u32>,
     applier_fails: bool,
     limit: Option<Duration>,
 }
@@ -269,10 +315,13 @@ fn rig_with(o: Opts) -> Rig {
         fail_set_password: StdMutex::new(false),
         hang_create: o.hang_create,
         delay: Duration::from_millis(o.delay_ms),
+        uid: o.create_uid.unwrap_or_else(account_uid),
     });
     let systemd = Arc::new(FakeSystemd::default());
     let runner = Arc::new(FakeRunner {
         fail: o.runner_fails,
+        root: r.to_path_buf(),
+        ignore_first: StdMutex::new(o.runner_ignores),
         ..Default::default()
     });
     let applier = Arc::new(FakeApplier {
@@ -748,4 +797,182 @@ async fn end_setup_needs_a_finished_setup() {
     let r = rig();
     assert_eq!(code(r.core.end_setup().await).1, "not-finished");
     assert!(r.systemd.log.lock().unwrap().is_empty());
+}
+
+// ----- S fixes: clean-up check, half-made safety, uid range, GiveUp -----------
+
+async fn finished(r: &Rig) {
+    r.create("ada", true).await.unwrap();
+    r.core.finish(ChoiceMap::new()).await.unwrap();
+}
+
+#[tokio::test]
+async fn end_setup_checks_the_clean_up_and_restarts_when_it_holds() {
+    let r = rig();
+    finished(&r).await;
+    assert!(r.core.cleanup_gaps().is_empty());
+    r.core.end_setup().await.unwrap();
+    assert_eq!(r.systemd.log.lock().unwrap().len(), 1);
+    // no extra lock runs when nothing was missing
+    assert_eq!(r.runner.log.lock().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn end_setup_redoes_a_missing_clean_up_once() {
+    let r = rig();
+    finished(&r).await;
+    // the autologin came back and the account was un-expired behind our back
+    fs::write(
+        r.dir
+            .path()
+            .join("etc/plasmalogin.conf.d/99-atlas-wizard.conf"),
+        "[Autologin]\nUser=atlas-setup\n",
+    )
+    .unwrap();
+    r.runner
+        .rewrite("etc/shadow", "atlas-setup", |f| f[7] = String::new());
+    r.core.end_setup().await.unwrap();
+    assert!(
+        !r.dir
+            .path()
+            .join("etc/plasmalogin.conf.d/99-atlas-wizard.conf")
+            .exists()
+    );
+    assert_eq!(r.runner.log.lock().unwrap().len(), 4, "the lock ran again");
+    assert_eq!(r.systemd.log.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn end_setup_does_not_restart_when_the_clean_up_cannot_be_completed() {
+    let r = rig();
+    finished(&r).await;
+    // the shell is wrong and the lock commands do nothing
+    r.runner
+        .rewrite("etc/passwd", "atlas-setup", |f| f[6] = "/bin/sh".into());
+    *r.runner.ignore_first.lock().unwrap() = 2;
+    let (k, c) = code(r.core.end_setup().await);
+    assert_eq!((k, c.as_str()), (Kind::Failed, "cleanup-incomplete"));
+    assert!(r.systemd.log.lock().unwrap().is_empty());
+    assert_eq!(r.runner.log.lock().unwrap().len(), 4, "redone exactly once");
+}
+
+#[test]
+fn the_expire_field_must_be_a_day_that_has_passed() {
+    let r = rig();
+    let shell = |f: &mut Vec<String>| f[6] = "/usr/sbin/nologin".into();
+    r.runner.rewrite("etc/passwd", "atlas-setup", shell);
+    let gaps = |expire: &str| {
+        let e = expire.to_string();
+        r.runner
+            .rewrite("etc/shadow", "atlas-setup", move |f| f[7] = e.clone());
+        fs::remove_file(
+            r.dir
+                .path()
+                .join("etc/plasmalogin.conf.d/99-atlas-wizard.conf"),
+        )
+        .ok();
+        r.core.cleanup_gaps()
+    };
+    assert!(gaps("0").is_empty());
+    assert!(gaps("1").is_empty());
+    assert_eq!(gaps(""), vec!["account-not-expired"]);
+    assert_eq!(gaps("-1"), vec!["account-not-expired"]);
+    assert_eq!(
+        gaps("99999"),
+        vec!["account-not-expired"],
+        "a day in the future"
+    );
+}
+
+#[tokio::test]
+async fn a_creating_stage_account_with_a_real_hash_is_not_deleted() {
+    let r = rig();
+    let uid = account_uid();
+    fs::write(
+        r.dir.path().join("etc/passwd"),
+        format!("ada:x:{uid}:{uid}::/home/ada:/bin/bash\n"),
+    )
+    .unwrap();
+    fs::write(
+        r.dir.path().join("etc/shadow"),
+        "ada:$y$j9T$salt$hash:19000::::::\n",
+    )
+    .unwrap();
+    fs::create_dir_all(r.dir.path().join("home/ada")).unwrap();
+    r.save_state(Some(Account {
+        name: "ada".into(),
+        uid: 0,
+        stage: Stage::Creating,
+    }));
+    let (k, c) = code(r.create("ada", false).await);
+    assert_eq!((k, c.as_str()), (Kind::Failed, "half-made-account-unclear"));
+    assert!(r.calls().is_empty(), "{:?}", r.calls());
+    assert!(r.dir.path().join("home/ada").exists());
+}
+
+#[tokio::test]
+async fn a_creating_stage_account_in_the_system_uid_range_is_not_deleted() {
+    let r = rig();
+    fs::write(
+        r.dir.path().join("etc/passwd"),
+        "ada:x:5:5::/home/ada:/bin/bash\n",
+    )
+    .unwrap();
+    fs::write(r.dir.path().join("etc/shadow"), "ada:!:19000::::::\n").unwrap();
+    r.save_state(Some(Account {
+        name: "ada".into(),
+        uid: 0,
+        stage: Stage::Creating,
+    }));
+    assert_eq!(
+        code(r.create("ada", false).await).1,
+        "half-made-account-unclear"
+    );
+    assert!(r.calls().is_empty());
+}
+
+#[tokio::test]
+async fn a_uid_outside_the_human_range_is_refused_and_left_half_made() {
+    let r = rig_with(Opts {
+        create_uid: Some(5),
+        ..Opts::default()
+    });
+    let (k, c) = code(r.create("ada", false).await);
+    assert_eq!((k, c.as_str()), (Kind::AccountsService, "accounts-bad-uid"));
+    let acc = r.state().account.unwrap();
+    assert_eq!((acc.stage, acc.uid), (Stage::Creating, 0));
+    assert!(!r.calls().iter().any(|c| c.starts_with("set_password")));
+    // next time the system-range account is not deleted, it is refused
+    assert_eq!(
+        code(r.create("ada", false).await).1,
+        "half-made-account-unclear"
+    );
+    assert!(!r.calls().iter().any(|c| c.starts_with("delete_user")));
+}
+
+#[tokio::test]
+async fn give_up_is_refused_once_an_account_exists_or_finish_has_begun() {
+    let r = rig();
+    r.create("ada", false).await.unwrap();
+    let (k, c) = code(r.core.give_up().await);
+    assert_eq!((k, c.as_str()), (Kind::Invalid, "account-exists"));
+    assert!(!r.state().gave_up);
+    assert!(r.systemd.log.lock().unwrap().is_empty());
+
+    let r = rig();
+    let st = State {
+        finish: Some(FINISH_SETTINGS.into()),
+        ..State::default()
+    };
+    st.save(&r.core.paths().state()).unwrap();
+    assert_eq!(code(r.core.give_up().await).1, "account-exists");
+
+    // a half-made account is still fine to give up on
+    let r = rig();
+    r.save_state(Some(Account {
+        name: "ada".into(),
+        uid: 1000,
+        stage: Stage::Created,
+    }));
+    r.core.give_up().await.unwrap();
 }

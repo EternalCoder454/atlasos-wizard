@@ -244,6 +244,16 @@ impl Core {
                 "The account service gave an unexpected answer.",
             )
         })?;
+        // AccountsService is trusted, but a uid outside the human range would
+        // later be deleted or chowned by number: refuse it, and leave the state
+        // at `creating` so the next call resolves (or refuses) it by name
+        if !(UID_MIN..=UID_MAX).contains(&uid) {
+            log::error!("CreateUser returned uid {uid}, outside {UID_MIN}..={UID_MAX}");
+            return Err(HelperError::accounts(
+                "accounts-bad-uid",
+                "The account service gave an unexpected answer.",
+            ));
+        }
         self.account_stage(&mut st, &name, uid, Stage::Created)?;
 
         self.accounts
@@ -304,7 +314,37 @@ impl Core {
         let entry = accounts::parse_passwd(&passwd)
             .into_iter()
             .find(|e| e.name == acc.name);
-        if let Some(entry) = entry {
+        if let Some(entry) = &entry {
+            // `creating` does not know the uid, so the state vouches for
+            // nothing but the name: a real-looking account (a usable hash, a
+            // system uid, files in its home) is never deleted on that alone
+            if acc.stage == Stage::Creating && acc.uid == 0 {
+                let shadow = std::fs::read_to_string(self.paths.join("etc/shadow"))
+                    .or_else(|e| {
+                        if e.kind() == std::io::ErrorKind::NotFound {
+                            Ok(String::new())
+                        } else {
+                            Err(e)
+                        }
+                    })
+                    .map_err(|e| io_failed("shadow read", &e))?;
+                let hash_unusable = accounts::parse_shadow(&shadow)
+                    .get(&acc.name)
+                    .is_none_or(|h| !accounts::usable_hash(h));
+                if !(UID_MIN..=UID_MAX).contains(&entry.uid)
+                    || !hash_unusable
+                    || !home_holds_only_skel(&self.paths, &entry.home)
+                {
+                    log::error!(
+                        "will not delete {}: stage creating, and the account is not plainly half-made",
+                        acc.name
+                    );
+                    return Err(HelperError::failed(
+                        "half-made-account-unclear",
+                        "An earlier account could not be told apart from a real one.",
+                    ));
+                }
+            }
             // `creating` does not know the uid yet (0): the passwd entry names it
             let uid_matches =
                 acc.uid == entry.uid || (acc.stage == Stage::Creating && acc.uid == 0);
@@ -504,6 +544,22 @@ impl Core {
                 "Setup has not been finished yet.",
             ));
         }
+        // The clean-up is what makes the setup user harmless once the login
+        // screen is back: check it, redo it once, and otherwise stay put.
+        let mut open = self.cleanup_gaps();
+        if !open.is_empty() {
+            log::warn!("EndSetup: the clean-up is incomplete ({open:?}); redoing it");
+            self.remove_setup_autologin();
+            self.lock_setup_user().await;
+            open = self.cleanup_gaps();
+            if !open.is_empty() {
+                log::error!("EndSetup: the clean-up is still incomplete ({open:?})");
+                return Err(HelperError::failed(
+                    "cleanup-incomplete",
+                    "Setup could not be closed completely.",
+                ));
+            }
+        }
         within(SYSTEMD_CALL_TIMEOUT, "EndSetup", async {
             self.systemd
                 .restart_unit(DISPLAY_MANAGER)
@@ -518,6 +574,45 @@ impl Core {
         Ok(())
     }
 
+    /// What of the setup user's clean-up is not in place: the autologin
+    /// drop-in is gone, its account is expired (shadow expire field 0 or a
+    /// day already past) and its shell is `nologin`. Anything unreadable
+    /// counts as not in place.
+    fn cleanup_gaps(&self) -> Vec<&'static str> {
+        let mut gaps = Vec::new();
+        match std::fs::symlink_metadata(self.paths.setup_autologin()) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            _ => gaps.push("autologin-drop-in"),
+        }
+        let user = self.paths.setup_user();
+        let today = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs() / 86_400);
+        let expired = std::fs::read_to_string(self.paths.join("etc/shadow"))
+            .ok()
+            .and_then(|t| {
+                t.lines()
+                    .find(|l| l.split(':').next() == Some(user))
+                    .and_then(|l| l.split(':').nth(7).map(str::to_owned))
+            })
+            .and_then(|f| f.parse::<u64>().ok())
+            .is_some_and(|day| day <= today);
+        if !expired {
+            gaps.push("account-not-expired");
+        }
+        let nologin = std::fs::read_to_string(self.paths.passwd())
+            .ok()
+            .is_some_and(|t| {
+                accounts::parse_passwd(&t)
+                    .iter()
+                    .any(|e| e.name == user && e.shell == "/usr/sbin/nologin")
+            });
+        if !nologin {
+            gaps.push("shell-not-nologin");
+        }
+        gaps
+    }
+
     /// Records that the GUI gave up, removes the setup autologin and starts
     /// the text-mode fallback.
     pub async fn give_up(&self) -> Result<(), HelperError> {
@@ -528,6 +623,20 @@ impl Core {
             return Err(HelperError::setup_done());
         }
         let mut st = self.load_state()?;
+        // a made account, or a Finish under way, must not be walked over by
+        // the text-mode fallback (which would add a second account)
+        if st.finish.is_some()
+            || st
+                .account
+                .as_ref()
+                .is_some_and(|a| a.stage == Stage::Verified)
+        {
+            log::warn!("GiveUp: an account already exists");
+            return Err(HelperError::invalid(
+                "account-exists",
+                "An account was already created.",
+            ));
+        }
         st.gave_up = true;
         self.save_state(&st)?;
         if !self.remove_setup_autologin() {

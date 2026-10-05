@@ -94,14 +94,22 @@ the new account except through `Finish`.
 Bus name `net.eterneon.atlas.WizardHelper`, object `/net/eterneon/atlas/WizardHelper`,
 interface `net.eterneon.atlas.WizardHelper1`. Every method:
 
-- authorizes the caller with `atlas_framework_system::polkit::check` against
-  its own action (non-interactive);
-- checks the caller's uid is `atlas-setup`'s (from the bus, not an argument);
+- checks the caller's uid is `atlas-setup`'s (`GetConnectionUnixUser` on the
+  sender, from the bus, not an argument) before anything else: a call from
+  another uid does no work, asks polkit nothing and does not reset the idle
+  timer; refusals are logged at most once a second, with a count of the rest;
+- then authorizes the caller with `atlas_framework_system::polkit::check`
+  against its own action (non-interactive);
 - refuses with `net.eterneon.atlas.Error.SetupDone` once `/etc/atlasos/setup-done`
   exists (`CreateAccount`, `Finish` and `GiveUp`; `EndSetup` runs after the
   markers and instead needs the state's `finish` to be `done`);
 - validates every argument again with wizard-core (never trusts the GUI);
 - takes no path, command, argv or unit name.
+
+The bus policy (`system.d/net.eterneon.atlas.WizardHelper.conf`) lets only
+root and `atlas-setup` send to the helper; the default stays deny. The process
+turns `PR_SET_DUMPABLE` off at start and the unit has `LimitCORE=0` and a
+capability allow-list (see the unit; to be verified in the VM).
 
 Errors are `net.eterneon.atlas.Error.{NotAuthorized,SetupDone,Invalid,AccountsService,Failed}`,
 with the message `<code>: <English text>`; the GUI splits on the first `: `
@@ -109,10 +117,10 @@ and shows its own translated text for the code.
 
 | Method | Polkit action | Does |
 |---|---|---|
-| `CreateAccount(s name, s full_name, ay password, b autologin) -> u uid` | `net.eterneon.atlas.wizard.create-account` | AccountsService `CreateUser(name, full_name, 1)` (administrator: wheel), then `SetPassword(yescrypt hash, "")` with the hash made in the helper. State stages `creating`, `created`, `password-set`, `verified` are written before and after each step. Verifies the passwd entry, the shadow hash, wheel, and the home owned by the uid. One account per first run: a second call fails unless the state names a half-made account, which is deleted first (only that uid, only when its home holds nothing but skel). The password buffer is zeroed. |
+| `CreateAccount(s name, s full_name, ay password, b autologin) -> u uid` | `net.eterneon.atlas.wizard.create-account` | AccountsService `CreateUser(name, full_name, 1)` (administrator: wheel), then `SetPassword(yescrypt hash, "")` with the hash made in the helper. State stages `creating`, `created`, `password-set`, `verified` are written before and after each step. Verifies the passwd entry, the shadow hash, wheel, and the home owned by the uid. One account per first run: a second call fails unless the state names a half-made account, which is deleted first (only that uid, only when its home holds nothing but skel; a `creating` stage, which has no uid yet, is deleted by name only when its uid is 1000..=60000, its shadow hash is absent, locked or empty and its home is skel-only, else `half-made-account-unclear`). A uid outside 1000..=60000 from `CreateUser` is refused (`accounts-bad-uid`) and the state stays `creating`. The helper zeroes its own copies of the password; it cannot zero zbus's message buffers, which is why core dumps are disabled (`PR_SET_DUMPABLE`, `LimitCORE=0`). |
 | `Finish(a{sv} choices)` | `net.eterneon.atlas.wizard.finish` | Writes the new account's settings as that user (below), the autologin drop-in if asked, then the done markers, removes the setup autologin, locks `atlas-setup`. Idempotent: a repeat after a crash finishes the remaining steps (state `finish`: `settings`, `autologin`, `markers`, `done`; once the markers exist only the clean-up is redone, and its failures are logged, not returned, since `prepare` redoes it at the next boot). |
-| `EndSetup()` | `net.eterneon.atlas.wizard.finish` | Restarts `display-manager.service` (systemd D-Bus, fixed unit). |
-| `GiveUp()` | `net.eterneon.atlas.wizard.fallback` | Records it in the state, removes the setup autologin, starts `atlas-wizard-fallback.service`. |
+| `EndSetup()` | `net.eterneon.atlas.wizard.finish` | Verifies the clean-up (the setup autologin drop-in is absent, `atlas-setup`'s shadow expire field is 0 or a past day, its shell is `/usr/sbin/nologin`), redoing it once if not and failing with `cleanup-incomplete` without restarting if it still is not; then restarts `display-manager.service` (systemd D-Bus, fixed unit). Repeatable. |
+| `GiveUp()` | `net.eterneon.atlas.wizard.fallback` | Records it in the state, removes the setup autologin, starts `atlas-wizard-fallback.service`. Refused with `Invalid` `account-exists` once the state's account is `verified` or `finish` is set. |
 
 `choices` keys (anything else is refused): `look` (`light` / `dark`),
 `accent` (`#rrggbb` from the offered list), `text_scale` (`1.0`, `1.25`,
@@ -136,7 +144,15 @@ and accent through `plasma-apply-lookandfeel --apply <id>` and
 `/usr/share/polkit-1/actions/net.eterneon.atlas.wizard.policy`: the three
 actions above, every default `no`. `/usr/share/polkit-1/rules.d/50-atlas-wizard.rules`
 returns YES only when `subject.user == "atlas-setup" && subject.local &&
-subject.active`, for our three actions and these stock ones:
+subject.active` and neither `/etc/atlasos/setup-done` nor
+`/etc/plasma-setup-done` exists (checked with
+`polkit.spawn(["/usr/bin/test", "!", "-e", path])`; a marker, or a spawn that
+fails, gives NO), for our three actions and these stock ones. The exception is
+`net.eterneon.atlas.wizard.finish`: `Finish` writes the markers first and
+`EndSetup` uses the same action after them, so it is not subject to the marker
+check; the helper's own state checks bound it (`SetupDone` unless `finish` is
+`markers` or `done`). `tests/helper/polkit-rules.test.mjs` tests the rule with
+a stub `polkit`.
 
 - `org.freedesktop.locale1.set-locale`, `org.freedesktop.locale1.set-keyboard`
 - `org.freedesktop.timedate1.set-timezone`, `org.freedesktop.timedate1.set-ntp`
@@ -147,7 +163,8 @@ subject.active`, for our three actions and these stock ones:
 
 plasma-setup's other grants (its KAuth actions, display scaling, temporary
 autologin) are not carried over. After setup `atlas-setup` can have no
-session (below), so the rule can never match again.
+session (below), so the rule can never match again, and the markers close it
+even if the clean-up failed.
 
 ## Done markers
 
@@ -208,7 +225,8 @@ the same way.
 account check refuses even for autologin), shell `/usr/sbin/nologin`, the
 setup autologin drop-in removed, `/run/atlas-setup` emptied, and its logind
 user terminated. `prepare` checks all of it at every boot and fixes what is
-missing. When the wizard must run again (a cut after the lock but before the
+missing, and `EndSetup` checks the first three before restarting the display
+manager. When the wizard must run again (a cut after the lock but before the
 markers, or markers removed by hand), `prepare` first undoes the lock
 (`chage -E -1`, shell `/bin/sh`, each only if needed) so the setup autologin
 can log in.

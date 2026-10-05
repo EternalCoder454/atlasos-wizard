@@ -50,6 +50,11 @@ struct Opts {
     allowed: Vec<&'static str>,
     setup_uid: u32,
     idle_ms: u64,
+    /// `Some(true)`: the test bus enforces the shipped bus policy with the
+    /// current user standing in for `atlas-setup`; `Some(false)`: with
+    /// somebody else standing in (and root's rule moved off us), so sending
+    /// is denied. `None`: everything may send.
+    shipped_policy: Option<bool>,
 }
 
 impl Default for Opts {
@@ -62,6 +67,7 @@ impl Default for Opts {
             ],
             setup_uid: me(),
             idle_ms: 120_000,
+            shipped_policy: None,
         }
     }
 }
@@ -84,6 +90,41 @@ impl Drop for World {
     }
 }
 
+/// The shipped bus policy's `<policy>` blocks, with the user names swapped for
+/// ones the test bus can tell apart: `atlas-setup` becomes this user (or
+/// `nobody`) and `root` becomes `nobody`, so root running the tests gets no
+/// special pass.
+fn shipped_policy_rules(allow_me: Option<bool>) -> String {
+    let Some(allow_me) = allow_me else {
+        return String::new();
+    };
+    let me = String::from_utf8(Command::new("id").arg("-un").output().unwrap().stdout).unwrap();
+    let me = me.trim();
+    assert!(
+        !me.is_empty() && me != "nobody",
+        "cannot tell this user from nobody"
+    );
+    let text = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../data/dbus-1/system.d/net.eterneon.atlas.WizardHelper.conf"),
+    )
+    .unwrap();
+    let body = text
+        .split_once("<busconfig>")
+        .and_then(|(_, rest)| rest.rsplit_once("</busconfig>"))
+        .expect("a busconfig")
+        .0;
+    assert!(body.contains("user=\"atlas-setup\"") && body.contains("user=\"root\""));
+    assert!(
+        !body.contains("context=\"default\""),
+        "the default must stay deny"
+    );
+    body.replace("user=\"root\"", "user=\"nobody\"").replace(
+        "user=\"atlas-setup\"",
+        &format!("user=\"{}\"", if allow_me { me } else { "nobody" }),
+    )
+}
+
 fn chmod(p: &Path, mode: u32) {
     fs::set_permissions(p, fs::Permissions::from_mode(mode)).unwrap();
 }
@@ -98,7 +139,19 @@ fn write_tool(root: &Path, log: &Path, rel: &str) {
          \"$(env | grep -v '^_=' | grep -v '^PWD=' | grep -v '^SHLVL=' | sort | tr '\\n' ' ')\" >> '{}'\n",
         log.display()
     );
-    fs::write(&p, script).unwrap();
+    // like the real commands, the lock tools change the temp root's files
+    let effect = match rel.rsplit('/').next() {
+        Some("chage") => format!(
+            "[ \"$1\" = -E ] && sed -i \"s/^\\(atlas-setup:\\([^:]*:\\)\\{{6\\}}\\)[^:]*/\\1$2/\" '{}'\n",
+            root.join("etc/shadow").display()
+        ),
+        Some("usermod") => format!(
+            "[ \"$1\" = -s ] && sed -i \"s|^\\(atlas-setup:\\([^:]*:\\)\\{{5\\}}\\)[^:]*|\\1$2|\" '{}'\n",
+            root.join("etc/passwd").display()
+        ),
+        _ => String::new(),
+    };
+    fs::write(&p, script + &effect).unwrap();
     chmod(&p, 0o755);
 }
 
@@ -235,8 +288,15 @@ impl World {
                 "<busconfig><type>session</type><keep_umask/>\
                  <listen>unix:path={}</listen><auth>EXTERNAL</auth>\
                  <policy context=\"default\"><allow send_destination=\"*\" eavesdrop=\"true\"/>\
-                 <allow eavesdrop=\"true\"/><allow own=\"*\"/></policy></busconfig>",
-                sock.display()
+                 <allow eavesdrop=\"true\"/><allow own=\"*\"/>{}</policy>{}</busconfig>",
+                sock.display(),
+                // the default of the real system bus for our name is deny
+                if o.shipped_policy.is_some() {
+                    "<deny send_destination=\"net.eterneon.atlas.WizardHelper\"/>"
+                } else {
+                    ""
+                },
+                shipped_policy_rules(o.shipped_policy),
             ),
         )
         .unwrap();
@@ -926,4 +986,73 @@ async fn the_helper_exits_when_idle_and_releases_its_name() {
     };
     assert!(status.success(), "{status}");
     assert!(!name_owned(&w.conn, BUS_NAME).await);
+}
+
+#[tokio::test]
+async fn the_shipped_bus_policy_lets_only_the_setup_user_send() {
+    // allowed: the user standing in for atlas-setup reaches the helper
+    let Some(w) = World::new(Opts {
+        shipped_policy: Some(true),
+        ..Opts::default()
+    })
+    .await
+    else {
+        return;
+    };
+    w.simple("GiveUp").await.unwrap();
+    drop(w);
+
+    // anyone else: the bus refuses before the helper sees the call
+    let Some(w) = World::new(Opts {
+        shipped_policy: Some(false),
+        ..Opts::default()
+    })
+    .await
+    else {
+        return;
+    };
+    let e = w.simple("GiveUp").await.unwrap_err();
+    assert!(
+        e.0.ends_with("AccessDenied"),
+        "the bus should refuse the call: {e:?}"
+    );
+    assert!(w.systemd_log().await.is_empty());
+    assert!(!w.root.join("var/lib/atlas-wizard/state.json").exists());
+}
+
+#[tokio::test]
+async fn a_refused_caller_does_not_keep_the_helper_alive() {
+    let Some(mut w) = World::new(Opts {
+        setup_uid: me() + 1,
+        idle_ms: 2000,
+        ..Opts::default()
+    })
+    .await
+    else {
+        return;
+    };
+    let start = Instant::now();
+    // refused calls, the last one at about half the idle time before the exit
+    for _ in 0..4 {
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        let e = w.simple("GiveUp").await.unwrap_err();
+        assert!(
+            err_name(&e, "NotAuthorized") && has_code(&e, "not-setup-user"),
+            "{e:?}"
+        );
+    }
+    let mut helper = w.helper.take().unwrap();
+    let status = loop {
+        if let Some(s) = helper.try_wait().unwrap() {
+            break s;
+        }
+        assert!(
+            start.elapsed() < Duration::from_millis(2900),
+            "a refused call reset the idle timer"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+    assert!(status.success(), "{status}");
+    // and the helper never asked polkit or did any work for them
+    assert!(w.accounts_log().await.is_empty());
 }
