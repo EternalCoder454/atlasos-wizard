@@ -124,15 +124,16 @@ pub fn decide(input: &BootInput) -> BootAction {
         return BootAction::MarkDoneAndCleanup;
     }
     let verified = verified_and_present(input);
+    // 5. (first) verified and boots >= 3, or forced to the fallback: the
+    // account exists, so the machine is finished with defaults.
+    if verified && (s.boots >= MAX_BOOTS || input.cmdline == Cmdline::Fallback) {
+        return BootAction::FinishWithDefaults;
+    }
     // 4. verified, Finish not done, boots < 3
     if verified && s.finish.is_none() && s.boots < MAX_BOOTS {
         return BootAction::RunWizard {
             resume_after_account: true,
         };
-    }
-    // 5. verified, boots >= 3
-    if verified && s.boots >= MAX_BOOTS {
-        return BootAction::FinishWithDefaults;
     }
     // (not in the table) verified and Finish already began, but no marker
     // yet: Finish is idempotent, so complete it instead of re-running pages.
@@ -318,6 +319,22 @@ mod tests {
     #[test]
     fn row6_three_boots_no_account() {
         assert_eq!(decide(&input(3, None, vec![])), BootAction::Fallback);
+    }
+
+    #[test]
+    fn cmdline_fallback_with_a_verified_account_finishes() {
+        for boots in [0, 1, 2, 3] {
+            let mut i = input(boots, acct(Stage::Verified), vec![human("ada", 1000)]);
+            i.cmdline = Cmdline::Fallback;
+            assert_eq!(decide(&i), BootAction::FinishWithDefaults, "boots {boots}");
+        }
+        let mut u = unknown(true, 0);
+        u.cmdline = Cmdline::Fallback;
+        assert_eq!(decide(&u), BootAction::FinishWithDefaults);
+        // Half-made: still the fallback.
+        let mut h = input(0, acct(Stage::Created), vec![]);
+        h.cmdline = Cmdline::Fallback;
+        assert_eq!(decide(&h), BootAction::Fallback);
     }
 
     #[test]

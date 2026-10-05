@@ -148,6 +148,8 @@ fn act(paths: &Paths, run: &dyn Runner, action: BootAction) -> &'static str {
         BootAction::RunWizard {
             resume_after_account,
         } => {
+            // The setup autologin fails at PAM for a locked `atlas-setup`.
+            lock::unlock_setup_user(paths, run);
             match write_dropin(paths) {
                 Ok(()) => {
                     log::info!(

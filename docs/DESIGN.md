@@ -186,7 +186,8 @@ Details of the table (`wizard_core::boot`):
 - "Finish not done" means `finish` is unset; a verified account whose Finish
   had begun (and no marker) is finished with defaults at once.
 - `atlas.wizard=fallback` only applies when there is no verified account: with
-  one, the account exists and the machine is finished with defaults instead.
+  one, the account exists and the machine is finished with defaults at once
+  (whatever `boots` is).
 - "Not in the state" means its name and uid differ from the state's account.
 - A state account that is not usable (no shadow hash, missing) counts as
   half-made, whatever its stage says. An unknown stage (from a newer wizard)
@@ -202,7 +203,10 @@ the same way.
 account check refuses even for autologin), shell `/usr/sbin/nologin`, the
 setup autologin drop-in removed, `/run/atlas-setup` emptied, and its logind
 user terminated. `prepare` checks all of it at every boot and fixes what is
-missing.
+missing. When the wizard must run again (a cut after the lock but before the
+markers, or markers removed by hand), `prepare` first undoes the lock
+(`chage -E -1`, shell `/bin/sh`, each only if needed) so the setup autologin
+can log in.
 
 **The fallback** (`atlas-wizard-fallback.service`, `Conflicts=display-manager.service`,
 `TTYPath=/dev/tty1`, `StandardInput=tty`): asks for the full name, user name

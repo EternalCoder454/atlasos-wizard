@@ -203,23 +203,47 @@ fn the_kernel_command_line_forces_the_fallback() {
 }
 
 #[test]
-fn fallback_command_line_never_overrides_a_verified_account() {
-    // With a verified account the table's rows 4 and 5 come first: the
-    // wizard resumes, or (three boots) the machine is finished with defaults.
+fn fallback_command_line_with_a_verified_account_finishes_with_defaults() {
+    for boots in [1, 3] {
+        let s = Sys::new();
+        s.cmdline("atlas.wizard=fallback");
+        s.add_human("ada", 1000);
+        s.state(&verified(boots));
+        s.prepare();
+        assert_eq!(s.marker_state(), (true, true), "boots {boots}");
+        assert_eq!(s.dropin(), None);
+        assert!(!s.commands().contains(&FALLBACK_CMD.to_string()));
+    }
+}
+
+#[test]
+fn a_locked_setup_user_is_unlocked_when_the_wizard_must_run() {
     let s = Sys::new();
-    s.cmdline("atlas.wizard=fallback");
-    s.add_human("ada", 1000);
-    s.state(&verified(1));
+    s.lock_atlas_setup();
     s.prepare();
     assert_eq!(s.dropin().as_deref(), Some(DROPIN));
-    assert!(!s.commands().contains(&FALLBACK_CMD.to_string()));
-    let t = Sys::new();
-    t.cmdline("atlas.wizard=fallback");
-    t.add_human("ada", 1000);
-    t.state(&verified(3));
-    t.prepare();
-    assert_eq!(t.marker_state(), (true, true));
-    assert!(!t.commands().contains(&FALLBACK_CMD.to_string()));
+    assert_eq!(
+        s.commands(),
+        [
+            "/usr/bin/chage -E -1 atlas-setup",
+            "/usr/sbin/usermod -s /bin/sh atlas-setup"
+        ]
+    );
+    assert!(s.read("etc/passwd").contains(":/bin/sh\n"));
+    assert!(
+        !s.read("etc/shadow")
+            .contains("atlas-setup:!*:19000:0:99999:7::0:")
+    );
+    s.prepare();
+    assert_eq!(s.commands().len(), 2, "a healthy boot runs nothing");
+}
+
+#[test]
+fn a_healthy_setup_user_runs_no_command_when_the_wizard_runs() {
+    let s = Sys::new();
+    s.prepare();
+    assert_eq!(s.dropin().as_deref(), Some(DROPIN));
+    assert!(s.commands().is_empty());
 }
 
 // ---- row 7: otherwise

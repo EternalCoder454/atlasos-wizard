@@ -18,6 +18,7 @@ const CHAGE: &str = "/usr/bin/chage";
 const USERMOD: &str = "/usr/sbin/usermod";
 const LOGINCTL: &str = "/usr/bin/loginctl";
 const NOLOGIN: &str = "/usr/sbin/nologin";
+const SETUP_SHELL: &str = "/bin/sh";
 
 /// Removes the setup autologin drop-in. True when it is gone afterwards.
 pub fn remove_dropin(paths: &Paths) -> bool {
@@ -94,6 +95,36 @@ fn lock_setup_user(paths: &Paths, run: &dyn Runner) {
         && run_logged(run, LOGINCTL, &["terminate-user", SETUP_USER])
     {
         log::info!("{SETUP_USER}: session ended");
+    }
+}
+
+/// The reverse of `lock_setup_user`, for when the wizard must run again (a
+/// cut between Finish's lock and its markers, or markers removed by hand):
+/// the setup autologin needs an account that is not expired and a login
+/// shell. Each step runs only when passwd or shadow show it is needed.
+pub fn unlock_setup_user(paths: &Paths, run: &dyn Runner) {
+    let Some(passwd) = read_text(&paths.passwd()) else {
+        return;
+    };
+    let Some(entry) = accounts::parse_passwd(&passwd)
+        .into_iter()
+        .find(|e| e.name == SETUP_USER)
+    else {
+        log::warn!("{SETUP_USER} does not exist; cannot unlock it");
+        return;
+    };
+    let today = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| (d.as_secs() / 86400) as i64);
+    if read_text(&paths.shadow()).and_then(|s| expired(&s, SETUP_USER, today)) == Some(true)
+        && run_logged(run, CHAGE, &["-E", "-1", SETUP_USER])
+    {
+        log::info!("{SETUP_USER}: account no longer expired");
+    }
+    if !accounts::login_shell(&entry.shell)
+        && run_logged(run, USERMOD, &["-s", SETUP_SHELL, SETUP_USER])
+    {
+        log::info!("{SETUP_USER}: shell set to {SETUP_SHELL}");
     }
 }
 
@@ -202,6 +233,25 @@ mod tests {
         fs::write(p.logind_user(975), "").unwrap();
         cleanup(&p, &f);
         assert_eq!(f.calls(), ["/usr/bin/loginctl terminate-user atlas-setup"]);
+    }
+
+    #[test]
+    fn unlock_undoes_the_lock_and_only_when_needed() {
+        let (_t, p) = setup(
+            &PASSWD.replace("/bin/sh", "/usr/sbin/nologin"),
+            SHADOW_LOCKED,
+        );
+        let f = Fake::new(&p);
+        unlock_setup_user(&p, &f);
+        assert_eq!(
+            f.calls(),
+            [
+                "/usr/bin/chage -E -1 atlas-setup",
+                "/usr/sbin/usermod -s /bin/sh atlas-setup"
+            ]
+        );
+        unlock_setup_user(&p, &f);
+        assert_eq!(f.calls().len(), 2, "healthy: nothing more");
     }
 
     #[test]

@@ -163,7 +163,12 @@ impl Fake {
     }
 
     fn chage(&self, args: &[&str]) {
-        let (Some(name), true) = (args.last(), args.contains(&"0")) else {
+        let Some(name) = args.last() else { return };
+        let day = if args.contains(&"0") {
+            "0"
+        } else if args.contains(&"-1") {
+            ""
+        } else {
             return;
         };
         let mut shadow = self.lines(self.paths.shadow());
@@ -173,7 +178,7 @@ impl Fake {
                 while f.len() < 9 {
                     f.push(String::new());
                 }
-                f[7] = "0".into();
+                f[7] = day.into();
                 *l = f.join(":");
             }
         }
