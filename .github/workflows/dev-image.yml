@@ -106,6 +106,10 @@ jobs:
             --build-arg "IMAGE_TAG=$WANT" \
             --label "org.opencontainers.image.revision=$GITHUB_SHA" \
             -t "$IMAGE:44" .
+      # GHCR publishes an image pushed from this public repo at once, so the
+      # secret check runs before the token is used at all.
+      - name: Check the image for secrets
+        run: ci/check-image-secrets.sh "$IMAGE:44"
       - name: Log in to GHCR (write)
         env:
           ACTOR: ${{ github.actor }}
@@ -136,4 +140,5 @@ jobs:
             --build-arg "ATLAS_FRAMEWORK_REF=$FRAMEWORK" \
             --build-arg "IMAGE_TAG=$WANT" \
             -t "$IMAGE:44" .
+          ci/check-image-secrets.sh "$IMAGE:44"
           echo "::warning title=Dev image out of date::The published $IMAGE:44 does not match this change (ci/Containerfile, the spec's BuildRequires or the framework tag). It built here, but the jobs after it still run in the published one until the change reaches main."
