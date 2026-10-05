@@ -18,7 +18,14 @@ use zbus::zvariant::{OwnedObjectPath, Value};
 use zeroize::Zeroizing;
 
 pub const CALL: Duration = Duration::from_secs(25);
-pub const ACCOUNT: Duration = Duration::from_secs(120);
+/// The helper calls get more than the helper's own limits, so the helper
+/// answers (with its error) before the GUI gives up on a call that is still
+/// working: CreateAccount and Finish have 120 s there (CREATE_TIMEOUT,
+/// FINISH_TIMEOUT); EndSetup redoes up to two 20 s lock commands and then
+/// restarts the display manager within 25 s.
+pub const ACCOUNT: Duration = Duration::from_secs(130);
+pub const FINISH: Duration = Duration::from_secs(130);
+pub const END_SETUP: Duration = Duration::from_secs(75);
 /// For the reads at start-up: a missing service must not hold the first page.
 const PROBE: Duration = Duration::from_secs(5);
 
@@ -591,14 +598,14 @@ impl System for Real {
 
     fn finish(&self, choices: &BTreeMap<String, Choice>) -> Res<()> {
         let body = finish_body(choices);
-        block(CALL, async {
+        block(FINISH, async {
             let c = system_bus().await?;
             call::<_, ()>(&c, HELPER, HELPER_PATH, HELPER_IFACE, "Finish", &(body,)).await
         })
     }
 
     fn end_setup(&self) -> Res<()> {
-        block(CALL, async {
+        block(END_SETUP, async {
             let c = system_bus().await?;
             call::<_, ()>(&c, HELPER, HELPER_PATH, HELPER_IFACE, "EndSetup", &()).await
         })

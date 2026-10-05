@@ -62,6 +62,47 @@ fn create_temp(dir: &Path, name: &str, mode: u32) -> io::Result<(std::path::Path
     Err(last.unwrap_or_else(|| io::Error::other("no temp name")))
 }
 
+/// Removes the temp files a crash left in `dir` (`.<name>.tmp-<pid>-<n>`,
+/// from `write_atomic`) whose pid is not this process's. Only for a time
+/// when no other process writes there (`prepare`, before the login screen).
+/// Returns how many went; a missing directory is none.
+///
+/// # Errors
+/// Any I/O error reading the directory or removing a leftover.
+pub fn remove_stale_temps(dir: &Path) -> io::Result<usize> {
+    let rd = match fs::read_dir(dir) {
+        Ok(rd) => rd,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(0),
+        Err(e) => return Err(e),
+    };
+    let own = std::process::id().to_string();
+    let mut n = 0;
+    for entry in rd {
+        let entry = entry?;
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        let Some((_, tail)) = name.strip_prefix('.').and_then(|r| r.rsplit_once(".tmp-")) else {
+            continue;
+        };
+        let Some((pid, count)) = tail.split_once('-') else {
+            continue;
+        };
+        let digits = |t: &str| !t.is_empty() && t.bytes().all(|b| b.is_ascii_digit());
+        if !digits(pid) || !digits(count) || pid == own || !entry.file_type()?.is_file() {
+            continue;
+        }
+        match fs::remove_file(entry.path()) {
+            Ok(()) => n += 1,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
+        }
+    }
+    if n > 0 {
+        sync_dir(dir)?;
+    }
+    Ok(n)
+}
+
 /// Flushes a directory's entries to disk (after a rename into it).
 ///
 /// # Errors
@@ -116,6 +157,43 @@ mod tests {
         assert!(write_atomic(&p, b"x", 0o644).is_err());
         assert!(p.is_dir());
         assert!(leftovers(d.path()).is_empty());
+    }
+
+    #[test]
+    fn stale_temps_go_and_nothing_else_does() {
+        let d = tempfile::tempdir().unwrap();
+        let own = format!(".state.json.tmp-{}-0", std::process::id());
+        for n in [
+            ".state.json.tmp-123-4",
+            ".99-atlas-wizard.conf.tmp-7-0",
+            &own,
+            "state.json",
+            ".hidden",
+            ".x.tmp-12a-0",
+            ".x.tmp--1",
+            "y.tmp-1-1",
+        ] {
+            fs::write(d.path().join(n), "x").unwrap();
+        }
+        fs::create_dir(d.path().join(".dir.tmp-5-5")).unwrap();
+        assert_eq!(remove_stale_temps(d.path()).unwrap(), 2);
+        let mut left: Vec<_> = fs::read_dir(d.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        left.sort();
+        let mut want = vec![
+            own.as_str(),
+            "state.json",
+            ".hidden",
+            ".x.tmp-12a-0",
+            ".x.tmp--1",
+            "y.tmp-1-1",
+            ".dir.tmp-5-5",
+        ];
+        want.sort_unstable();
+        assert_eq!(left, want);
+        assert_eq!(remove_stale_temps(&d.path().join("none")).unwrap(), 0);
     }
 
     #[test]

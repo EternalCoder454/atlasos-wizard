@@ -8,6 +8,8 @@ use std::time::{Duration, Instant};
 
 /// How long any command may run before it is killed.
 pub const TIMEOUT: Duration = Duration::from_secs(20);
+/// How much of a failed program's stderr goes to the log.
+const ERR_KEPT: usize = 512;
 
 /// Why a command did not succeed. Never holds what was on its stdin.
 #[derive(Debug)]
@@ -66,6 +68,21 @@ impl Runner for SystemRunner {
             .stderr(Stdio::piped())
             .spawn()
             .map_err(CmdError::Spawn)?;
+        // stderr is read while the program runs, so one that writes a lot
+        // cannot fill the pipe and stall until the timeout; the first
+        // ERR_KEPT bytes are kept for the log.
+        let (tx, rx) = std::sync::mpsc::channel();
+        if let Some(mut err) = child.stderr.take() {
+            std::thread::spawn(move || {
+                let mut kept = Vec::new();
+                let mut buf = [0u8; 4096];
+                while let Ok(n @ 1..) = err.read(&mut buf) {
+                    let room = ERR_KEPT.saturating_sub(kept.len());
+                    kept.extend_from_slice(&buf[..n.min(room)]);
+                }
+                let _ = tx.send(kept);
+            });
+        }
         if let (Some(data), Some(mut pipe)) = (stdin, child.stdin.take()) {
             // The input is a few hundred bytes at most, far below the pipe
             // buffer, so this cannot block. A program that exits early
@@ -93,12 +110,9 @@ impl Runner for SystemRunner {
         if status.success() {
             return Ok(());
         }
-        let mut msg = String::new();
-        if let Some(err) = child.stderr.take() {
-            let mut buf = Vec::new();
-            let _ = err.take(512).read_to_end(&mut buf);
-            msg = String::from_utf8_lossy(&buf).trim().replace('\n', " ");
-        }
+        // A grandchild that kept stderr open must not hold us here.
+        let buf = rx.recv_timeout(Duration::from_secs(1)).unwrap_or_default();
+        let msg = String::from_utf8_lossy(&buf).trim().replace('\n', " ");
         Err(CmdError::Exit(status.code(), msg))
     }
 }
@@ -154,6 +168,23 @@ mod tests {
                 .run("/usr/bin/sh", &["-c", "test -z \"$HOME\""], None)
                 .is_ok()
         );
+    }
+
+    #[test]
+    fn a_program_that_floods_stderr_does_not_stall() {
+        // 1 MiB of stderr, far past the 64 KiB pipe buffer, then a failure:
+        // it ends at once and only the first ERR_KEPT bytes are kept
+        let start = Instant::now();
+        let r = SystemRunner.run(
+            "/usr/bin/sh",
+            &["-c", "head -c 1048576 /dev/zero | tr '\\0' e >&2; exit 3"],
+            None,
+        );
+        assert!(start.elapsed() < Duration::from_secs(10));
+        let Err(CmdError::Exit(Some(3), msg)) = r else {
+            panic!("expected exit 3");
+        };
+        assert_eq!(msg.len(), ERR_KEPT);
     }
 
     #[test]

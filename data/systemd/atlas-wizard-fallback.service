@@ -4,10 +4,11 @@ Documentation=https://github.com/EternalCoder454/atlasos-wizard/blob/main/docs/D
 # The login screen and a getty would fight it for the console.
 Conflicts=display-manager.service getty@tty1.service
 After=atlas-wizard-boot.service systemd-user-sessions.service plymouth-quit-wait.service getty@tty1.service
-# A broken fallback must not spin: five starts in two minutes and it stays
-# stopped (the other virtual terminals still have a login).
-StartLimitIntervalSec=120
-StartLimitBurst=5
+# Never given up on: when it runs there is no account yet and the login
+# screen is stopped (Conflicts), so a stopped fallback would leave no way in
+# until a reboot. It cannot spin either: the restarts back off from 10 s to
+# a minute (below).
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -22,7 +23,9 @@ TTYReset=yes
 TTYVHangup=yes
 TTYVTDisallocate=yes
 Restart=on-failure
-RestartSec=2
+RestartSec=10
+RestartSteps=5
+RestartMaxDelaySec=60
 UMask=0022
 
 # useradd -m writes /etc, /home (/var/home on an image-based system), the mail
@@ -49,12 +52,20 @@ SystemCallArchitectures=native
 # The journal, the system bus and systemd's sockets; shadow-utils' audit
 # record needs AF_NETLINK and they go on without it.
 RestrictAddressFamilies=AF_UNIX
+# The password must never land in a core file (the program also turns
+# dumping off).
+LimitCORE=0
+ProtectProc=invisible
 # Left out on purpose: NoNewPrivileges. useradd, chage and chpasswd run in their own
 # SELinux domains, and it blocks the transition (as in
 # atlas-wizard-helper.service). To verify in the AtlasOS VM with SELinux
 # enforcing (`ausearch -m avc`, the journal for EPERM; MemoryDenyWriteExecute
 # and the address families too), then add a CapabilityBoundingSet of what the
-# run shows it needs.
+# run shows it needs (likely CAP_CHOWN CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH
+# CAP_FOWNER CAP_FSETID CAP_KILL CAP_SETUID CAP_SETGID CAP_AUDIT_WRITE CAP_SYS_TTY_CONFIG (chvt)),
+# SystemCallFilter=@system-service and, for the fallback, PrivateDevices=yes
+# or a DeviceAllow= list. Not before: a wrong guess kills the one way left
+# to make an account.
 
 # No [Install]: started by `prepare` (no way to the graphical setup) or by the
 # helper's GiveUp, never at boot on its own.

@@ -27,7 +27,7 @@ QtObject {
         case "full-name-bad-char":
             return qsTr("The name cannot contain colons, commas or equals signs.");
         case "full-name-control":
-            return qsTr("The name cannot contain line breaks or control characters.");
+            return qsTr("The name cannot contain line breaks, control or invisible characters.");
         case "password-too-short":
             return qsTr("Use at least 8 characters.");
         case "password-too-long":

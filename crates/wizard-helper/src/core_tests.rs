@@ -173,6 +173,8 @@ struct FakeRunner {
     root: PathBuf,
     /// Runs that do nothing at all, from the start (they still succeed).
     ignore_first: StdMutex<usize>,
+    /// While set, every run never ends (a stuck chage or usermod).
+    hang: StdMutex<bool>,
 }
 
 impl FakeRunner {
@@ -204,12 +206,16 @@ impl Runner for FakeRunner {
             .unwrap()
             .push(format!("{program} {}", args.join(" ")));
         let fail = self.fail;
+        let hang = *self.hang.lock().unwrap();
         let ignored = {
             let mut n = self.ignore_first.lock().unwrap();
             let ignore = *n > 0;
             *n = n.saturating_sub(1);
             ignore
         };
+        if hang {
+            return Box::pin(std::future::pending());
+        }
         if !fail && !ignored {
             let user = args.last().copied().unwrap_or("");
             match (program, args.first().copied()) {
@@ -272,6 +278,7 @@ struct Opts {
     create_uid: Option<u32>,
     applier_fails: bool,
     limit: Option<Duration>,
+    finish_limit: Option<Duration>,
 }
 
 fn rig_with(o: Opts) -> Rig {
@@ -337,6 +344,9 @@ fn rig_with(o: Opts) -> Rig {
     );
     if let Some(l) = o.limit {
         core = core.with_create_timeout(l);
+    }
+    if let Some(l) = o.finish_limit {
+        core = core.with_finish_timeout(l);
     }
     Rig {
         dir,
@@ -1045,4 +1055,84 @@ async fn finish_is_refused_after_giving_up_unless_resuming_the_markers() {
     st.save(&r.core.paths().state()).unwrap();
     r.core.finish(ChoiceMap::new()).await.unwrap();
     assert_eq!(r.state().finish.as_deref(), Some(FINISH_DONE));
+}
+
+// ----- R fixes: stale verified note, shell check, Finish cut by its timeout ----
+
+#[tokio::test]
+async fn a_verified_account_gone_from_passwd_is_a_stale_note() {
+    let r = rig();
+    r.create("ada", false).await.unwrap();
+    assert_eq!(r.state().account.as_ref().unwrap().stage, Stage::Verified);
+    // an /etc reset or an admin's userdel
+    for f in ["etc/passwd", "etc/shadow"] {
+        let p = r.dir.path().join(f);
+        let kept: String = fs::read_to_string(&p)
+            .unwrap()
+            .lines()
+            .filter(|l| !l.starts_with("ada:"))
+            .map(|l| format!("{l}\n"))
+            .collect();
+        fs::write(p, kept).unwrap();
+    }
+    r.create("ada", false).await.unwrap();
+    assert_eq!(r.state().account.unwrap().stage, Stage::Verified);
+    assert!(!r.calls().iter().any(|c| c.starts_with("delete_user")));
+}
+
+#[tokio::test]
+async fn a_verified_account_that_is_present_still_refuses_a_second() {
+    let r = rig();
+    r.create("ada", false).await.unwrap();
+    assert_eq!(
+        code(r.create("bob", false).await),
+        (Kind::Invalid, "account-exists".into())
+    );
+}
+
+#[tokio::test]
+async fn a_verified_account_with_unreadable_passwd_is_refused() {
+    let r = rig();
+    r.create("ada", false).await.unwrap();
+    let p = r.dir.path().join("etc/passwd");
+    fs::remove_file(&p).unwrap();
+    fs::create_dir(&p).unwrap();
+    assert_eq!(code(r.create("ada", false).await).1, "account-exists");
+    assert!(r.state().account.is_some(), "the note is kept");
+}
+
+#[tokio::test]
+async fn end_setup_accepts_any_non_login_shell() {
+    for shell in ["/sbin/nologin", "/bin/false"] {
+        let r = rig();
+        finished(&r).await;
+        r.runner
+            .rewrite("etc/passwd", "atlas-setup", |f| f[6] = shell.into());
+        assert!(r.core.cleanup_gaps().is_empty(), "{shell}");
+        r.core.end_setup().await.unwrap();
+        assert_eq!(r.runner.log.lock().unwrap().len(), 2, "no redo for {shell}");
+    }
+}
+
+#[tokio::test]
+async fn finish_cut_by_its_timeout_after_the_markers_is_completed_by_end_setup() {
+    let r = rig_with(Opts {
+        finish_limit: Some(Duration::from_millis(300)),
+        ..Opts::default()
+    });
+    r.create("ada", true).await.unwrap();
+    // chage and usermod hang: Finish passes the markers, then runs out of time
+    *r.runner.hang.lock().unwrap() = true;
+    assert_eq!(
+        code(r.core.finish(ChoiceMap::new()).await),
+        (Kind::Failed, "timeout".into())
+    );
+    assert!(markers::is_done(r.dir.path()));
+    assert_eq!(r.state().finish.as_deref(), Some(FINISH_MARKERS));
+    // the tool works again; EndSetup finishes what Finish left
+    *r.runner.hang.lock().unwrap() = false;
+    r.core.end_setup().await.unwrap();
+    assert_eq!(r.state().finish.as_deref(), Some(FINISH_DONE));
+    assert!(r.core.cleanup_gaps().is_empty());
+    assert_eq!(r.systemd.log.lock().unwrap().len(), 1);
 }

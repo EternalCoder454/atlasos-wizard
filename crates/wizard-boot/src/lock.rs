@@ -10,7 +10,7 @@ use crate::paths::{Paths, SETUP_USER};
 use std::fs;
 use std::io;
 use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use wizard_core::accounts;
 
 /// `chage` and `usermod` as installed on Fedora (`/usr/sbin` is `/usr/bin`).
@@ -19,6 +19,9 @@ const USERMOD: &str = "/usr/sbin/usermod";
 const LOGINCTL: &str = "/usr/bin/loginctl";
 const NOLOGIN: &str = "/usr/sbin/nologin";
 const SETUP_SHELL: &str = "/bin/sh";
+/// `terminate-user` returns before the user's processes are gone; how long to
+/// wait for them, so none writes into the home after it is emptied.
+const LOGIND_WAIT: Duration = Duration::from_secs(5);
 
 /// Removes the setup autologin drop-in. True when it is gone afterwards.
 pub fn remove_dropin(paths: &Paths) -> bool {
@@ -91,10 +94,17 @@ fn lock_setup_user(paths: &Paths, run: &dyn Runner) {
     {
         log::info!("{SETUP_USER}: shell set to {NOLOGIN}");
     }
-    if paths.logind_user(entry.uid).exists()
-        && run_logged(run, LOGINCTL, &["terminate-user", SETUP_USER])
-    {
-        log::info!("{SETUP_USER}: session ended");
+    let logind = paths.logind_user(entry.uid);
+    if logind.exists() && run_logged(run, LOGINCTL, &["terminate-user", SETUP_USER]) {
+        let start = Instant::now();
+        while logind.exists() && start.elapsed() < LOGIND_WAIT {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        if logind.exists() {
+            log::warn!("{SETUP_USER}: still has processes after terminate-user");
+        } else {
+            log::info!("{SETUP_USER}: session ended");
+        }
     }
 }
 
@@ -129,7 +139,9 @@ pub fn unlock_setup_user(paths: &Paths, run: &dyn Runner) {
 }
 
 /// Removes everything inside `dir`, never following a symlink; the directory
-/// stays. Returns how many entries went.
+/// stays. Returns how many entries went. An entry that cannot be removed does
+/// not stop the rest; the first such error is returned at the end. One that
+/// vanished meanwhile is not an error.
 pub fn empty_dir(dir: &Path) -> io::Result<usize> {
     let rd = match fs::read_dir(dir) {
         Ok(rd) => rd,
@@ -137,18 +149,27 @@ pub fn empty_dir(dir: &Path) -> io::Result<usize> {
         Err(e) => return Err(e),
     };
     let mut n = 0;
+    let mut first_err = None;
     for entry in rd {
-        let entry = entry?;
-        let p = entry.path();
-        // `file_type` of a DirEntry does not follow symlinks.
-        if entry.file_type()?.is_dir() {
-            fs::remove_dir_all(&p)?;
-        } else {
-            fs::remove_file(&p)?;
+        let removed = entry.and_then(|entry| {
+            let p = entry.path();
+            // `file_type` of a DirEntry does not follow symlinks.
+            if entry.file_type()?.is_dir() {
+                fs::remove_dir_all(&p)
+            } else {
+                fs::remove_file(&p)
+            }
+        });
+        match removed {
+            Ok(()) => n += 1,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => {
+                log::error!("could not remove an entry of {}: {e}", dir.display());
+                first_err.get_or_insert(e);
+            }
         }
-        n += 1;
     }
-    Ok(n)
+    first_err.map_or(Ok(n), Err)
 }
 
 /// All of the cleanup. Failures are logged and the rest still runs.
@@ -271,6 +292,36 @@ mod tests {
         cleanup(&p, &f);
         assert_eq!(f.calls().len(), 2, "usermod still ran");
         assert!(!t.path().join("run/atlas-setup/answers.json").exists());
+    }
+
+    #[test]
+    fn terminate_waits_for_logind_to_let_go() {
+        let (_t, p) = setup(PASSWD, SHADOW_LOCKED);
+        fs::create_dir_all(p.logind_user(975).parent().unwrap()).unwrap();
+        fs::write(p.logind_user(975), "").unwrap();
+        let start = std::time::Instant::now();
+        cleanup(&p, &Fake::new(&p));
+        // the fake ends the user at once: no waiting the full LOGIND_WAIT
+        assert!(start.elapsed() < LOGIND_WAIT);
+        assert!(!p.logind_user(975).exists());
+    }
+
+    #[test]
+    fn empty_dir_goes_on_past_an_entry_it_cannot_remove() {
+        if rustix::process::getuid().is_root() {
+            return; // root removes from a read-only directory too
+        }
+        use std::os::unix::fs::PermissionsExt;
+        let t = tempfile::tempdir().unwrap();
+        let home = t.path().join("home");
+        fs::create_dir_all(home.join("stuck")).unwrap();
+        fs::write(home.join("stuck/inner"), "x").unwrap();
+        fs::write(home.join("a"), "x").unwrap();
+        fs::write(home.join("z"), "x").unwrap();
+        fs::set_permissions(home.join("stuck"), fs::Permissions::from_mode(0o555)).unwrap();
+        assert!(empty_dir(&home).is_err());
+        fs::set_permissions(home.join("stuck"), fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(!home.join("a").exists() && !home.join("z").exists());
     }
 
     #[test]

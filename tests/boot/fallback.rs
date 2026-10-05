@@ -165,7 +165,7 @@ fn creates_the_account_through_the_terminal() {
     assert_eq!(
         s.commands(),
         [
-            "/usr/sbin/useradd -m -U -G wheel -c Ada Lovelace ada",
+            "/usr/sbin/useradd -m -U -G wheel -c Ada Lovelace -- ada",
             "/usr/sbin/chpasswd -e",
             LOCK_CMDS[0],
             LOCK_CMDS[1],
@@ -310,10 +310,10 @@ fn a_half_made_account_is_deleted_before_asking() {
     let out = piped(&s, &format!("Ada Lovelace\nada\n{GOOD}\n{GOOD}\n"));
     assert!(out.status.success());
     let cmds = s.commands();
-    assert_eq!(cmds[0], "/usr/sbin/userdel -r ada", "{cmds:?}");
+    assert_eq!(cmds[0], "/usr/sbin/userdel -r -- ada", "{cmds:?}");
     assert_eq!(
         cmds[1],
-        "/usr/sbin/useradd -m -U -G wheel -c Ada Lovelace ada"
+        "/usr/sbin/useradd -m -U -G wheel -c Ada Lovelace -- ada"
     );
     assert_eq!(s.state_json()["account"]["stage"], "verified");
 }

@@ -37,7 +37,7 @@ docs/                           this file, the image hand-over
 |---|---|---|
 | `/usr/libexec/atlas-wizard-boot prepare` | root, `atlas-wizard-boot.service`, every boot before the display manager | Reads the state and the system, decides (table below), writes or removes the setup autologin, cleans up and locks `atlas-setup` once setup is done. Fast: a few stats when done. |
 | `/usr/libexec/atlas-wizard-boot fallback` | root, `atlas-wizard-fallback.service` on tty1 | Text-mode account creation, when the GUI cannot run. |
-| `/usr/libexec/atlas-wizard-session` | `atlas-setup`, the plasmalogin autologin session `atlas-wizard` | Starts `kwin_wayland` with only the wizard, the screen reader's bus, the on-screen keyboard. Counts failed starts this boot in `/run/atlas-setup/session-failures` and failed `GiveUp` calls in `giveup-tries` (after 10 it logs once and sleeps forever, so plasmalogin stops respawning it and a reboot takes the boot fallback row); at 3 it calls the helper's `GiveUp`. If that fails: on `SetupDone` (busctl prints the message, `setup-done: ...`) it calls `EndSetup` (clean-up again, display manager restart); on any other failure it logs with `logger -t atlas-wizard-session`, sleeps 5 s after the first failure, 15 s after the second and 30 s after each later one (about 5 minutes over the 10 tries) and exits non-zero, so a restart loop cannot spin and a slow-starting helper is waited for. |
+| `/usr/libexec/atlas-wizard-session` | `atlas-setup`, the plasmalogin autologin session `atlas-wizard` | Starts `kwin_wayland` with only the wizard, the screen reader's bus, the on-screen keyboard. Counts the starts this boot that did not end with setup done in `/run/atlas-setup/session-failures` (a wizard that exits 0 without finishing counts too, the count is reset only once a done marker exists, a start that cannot write the count gives up at once, and a failed start waits 2 s before plasmalogin's relogin) and failed `GiveUp` calls in `giveup-tries` (after 10 it logs and asks logind to reboot, the stock `org.freedesktop.login1.reboot` allowed to an active local session, then sleeps so plasmalogin stops respawning it; the boot count then reaches the boot fallback row). At 3 it calls the helper's `GiveUp`. Both counts are files of `atlas-setup`, so that user can reset or raise them: availability only (a crash loop that never gives up, or giving up early); the root-kept `boots` count still sends the next boot to the fallback. If that fails: on `SetupDone` (busctl prints the message, `setup-done: ...`) it calls `EndSetup` (clean-up again, display manager restart); on any other failure it logs with `logger -t atlas-wizard-session`, sleeps 5 s after the first failure, 15 s after the second and 30 s after each later one (about 5 minutes over the 10 tries) and exits non-zero, so a restart loop cannot spin and a slow-starting helper is waited for. |
 | `/usr/bin/atlas-wizard` | `atlas-setup` | The setup pages. |
 | `/usr/bin/atlas-wizard --welcome` | the signed-in user, XDG autostart | First-login extras: fingerprint, PIN. |
 | `/usr/libexec/atlas-wizard-helper` | root, D-Bus activated (`atlas-wizard-helper.service`, `Type=dbus`), exits after 30 s idle | The only privileged code the GUI reaches. |
@@ -154,7 +154,7 @@ subject.active` and neither `/etc/atlasos/setup-done` nor
 `/etc/plasma-setup-done` exists (checked with
 `polkit.spawn(["/usr/bin/test", "-d", parent, "-a", "-x", parent, "-a", "!", "-e", path])` with
 parent `/etc/atlasos` or `/etc`, which tmpfiles.d creates; a marker, a missing
-or unsearchable parent (checked with access(2); that only proves the parent can be searched, a stat failure on the marker file itself still reads as "no marker", and the helper's fail-closed `is_done_or_unknown` is the backstop), or a spawn that fails, gives NO). The
+or unsearchable parent (checked with access(2); that only proves the parent can be searched, a stat failure on the marker file itself still reads as "no marker", and the helper's fail-closed marker check is the backstop), or a spawn that fails, gives NO). The
 helper likewise counts a marker it cannot stat as done, for our three actions and these stock ones. The exception is
 `net.eterneon.atlas.wizard.finish`: `Finish` writes the markers first and
 `EndSetup` uses the same action after them, so it is not subject to the marker
@@ -183,6 +183,10 @@ even if the clean-up failed.
   plasma-setup never runs it again.
 - An existing `/etc/plasma-setup-done` (a machine set up before this wizard)
   counts as done.
+- A marker that cannot be checked (stat fails: EACCES, SELinux, I/O error)
+  counts as there, in `prepare`, the fallback and the helper alike
+  (`wizard_core::markers`), so a stat failure never reopens setup on a
+  finished machine.
 
 ## State and recovery
 
@@ -228,7 +232,15 @@ Details of the table (`wizard_core::boot`):
 
 A half-made account (`creating`, `created`, `password-set`) is resolved by the
 helper at the next `CreateAccount` (deleted, made again), and by the fallback
-the same way.
+the same way, with the same bar: the uid in passwd must be a human one and
+match the state's, and the home hold only what `/etc/skel` put there. At
+`creating` the uid was never recorded (0), so the state vouches for the name
+alone: the account must also have no usable password hash, as `useradd`
+leaves it, so an account of that name made some other way is never deleted.
+A `verified` account that passwd no longer lists (/etc reset, `userdel` by
+hand) is a stale note everywhere: the helper and the fallback forget it and
+set up again, and `prepare` runs the wizard again; one that cannot be checked (passwd or shadow
+unreadable) still counts as made.
 
 **Locking `atlas-setup`:** account expired (`chage -E 0`, which pam_unix's
 account check refuses even for autologin), shell `/usr/sbin/nologin`, the
@@ -244,10 +256,16 @@ can log in.
 `TTYPath=/dev/tty1`, `StandardInput=tty`): asks for the full name, user name
 and password twice on the console, with the same wizard-core validation, and
 creates the account with `useradd -m -U -G wheel -c <name> <user>` and
-`chpasswd -e` (the hash on stdin), fixed argv. It is the one path that does
+`chpasswd -e` (the hash on stdin), fixed argv (`--` before the user name). It is the one path that does
 not use AccountsService, so a broken AccountsService still ends in an
 account. Then it writes the markers, cleans up and starts the display manager.
-No Qt, GPU or network needed.
+No Qt, GPU or network needed. The password is typed into it, so it turns
+`PR_SET_DUMPABLE` off and its unit has `LimitCORE=0`; the line buffer is
+reserved once (never moved) and wiped after each line, and a terminal whose
+echo cannot be turned off is not asked for a password. It is never given up
+on (`StartLimitIntervalSec=0`): while it runs there is no account and the
+login screen is stopped, so it restarts after a failure, backing off from
+10 s to a minute.
 
 **Kernel command line, for support:** `atlas.wizard=fallback` forces the text
 mode; `atlas.wizard=skip` marks setup done when an account already exists.
@@ -273,7 +291,9 @@ Appearance, Privacy, Finish. First login: Fingerprint, PIN.
   password and confirmation with a strength meter, "Sign in automatically"
   (off). Rules (decided 2026-10-05): user name `^[a-z_][a-z0-9_-]{0,31}$`, not
   a name in passwd or group, not reserved; full name at most 255 bytes, no
-  `:`, `,`, `=`, newline or control characters; password at least 8
+  `:`, `,`, `=`, newline, control characters or invisible format characters
+  that disguise it (bidi controls, zero-width space, BOM, tags; the joiners
+  ZWJ and ZWNJ are allowed); password at least 8
   characters, not the user name or full name, and libpwquality's check
   (dictionary included) passes.
 - **Hostname**: only when the static hostname is unset, `localhost*` or
@@ -303,8 +323,11 @@ will have them (framework ROADMAP item 42), so each stand-in mirrors the
 ## Threading and errors
 
 The GUI thread never blocks: every D-Bus call and file read runs on a worker
-and posts back with `qt_thread().queue`. Every D-Bus call has a timeout (25 s,
-120 s for `CreateAccount`, which can wait for AccountsService to start).
+and posts back with `qt_thread().queue`. Every D-Bus call has a timeout: 25 s, and
+for the helper's long calls longer than the helper's own limit, so the
+helper's error arrives before the GUI gives up on a call still working
+(`CreateAccount` 130 s against 120 s, as it can wait for AccountsService to
+start; `Finish` 130 s against 120 s; `EndSetup` 75 s).
 Every error reaches the page in plain words with a way on (Try Again, Skip,
 Back). Logs: `journalctl -t atlas-wizard`, `-t atlas-wizard-helper`,
 `-t atlas-wizard-boot`; each decision and step is logged, a password never is

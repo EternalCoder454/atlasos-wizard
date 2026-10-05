@@ -9,7 +9,8 @@ use std::io;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 use wizard_core::accounts::{self, UID_MAX, UID_MIN};
-use wizard_core::state::Account;
+use wizard_core::state::{Account, Stage};
+use wizard_core::validate;
 
 const USERDEL: &str = "/usr/sbin/userdel";
 const MAX_DEPTH: u32 = 16;
@@ -61,13 +62,24 @@ fn same_as_skel(skel: &Path, home: &Path, depth: u32) -> io::Result<bool> {
     Ok(true)
 }
 
-/// Deletes the account in `acct` (name, and uid unless it is 0, which means
-/// "not known yet": the account was started but its uid never recorded).
+/// Deletes the account in `acct` (name, and uid unless it is 0 at stage
+/// `creating`, which means "not known yet": the account was started but its
+/// uid never recorded). With the uid unknown the state vouches for nothing
+/// but the name, so the account must also look plainly half-made: no usable
+/// password hash (as `useradd` leaves it), as the helper requires. A
+/// pre-existing account of that name is never deleted on the name alone.
 /// `Ok(())` also when there is nothing to delete.
 ///
 /// # Errors
 /// [`Kept`], with the reason it was left.
 pub fn remove(paths: &Paths, run: &dyn Runner, acct: &Account) -> Result<(), Kept> {
+    // The state is root's, but a name that is not one `useradd` would take
+    // never reaches `userdel`.
+    if validate::user_name(&acct.name).is_err() {
+        log::error!("not deleting an account the state names oddly");
+        return Err(Kept::NotOurs);
+    }
+    let uid_unknown = acct.uid == 0 && acct.stage == Stage::Creating;
     let passwd = match fs::read(paths.passwd()) {
         Ok(b) => String::from_utf8_lossy(&b).into_owned(),
         Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
@@ -82,13 +94,33 @@ pub fn remove(paths: &Paths, run: &dyn Runner, acct: &Account) -> Result<(), Kep
     else {
         return Ok(());
     };
-    if !(UID_MIN..=UID_MAX).contains(&entry.uid) || (acct.uid != 0 && entry.uid != acct.uid) {
+    if !(UID_MIN..=UID_MAX).contains(&entry.uid) || (!uid_unknown && entry.uid != acct.uid) {
         log::error!(
             "not deleting {}: uid {} is not the account the setup made",
             acct.name,
             entry.uid
         );
         return Err(Kept::NotOurs);
+    }
+    if uid_unknown {
+        let shadow = match fs::read(paths.shadow()) {
+            Ok(b) => String::from_utf8_lossy(&b).into_owned(),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
+            Err(e) => {
+                log::error!("cannot read shadow: {e}");
+                return Err(Kept::Unreadable);
+            }
+        };
+        if accounts::parse_shadow(&shadow)
+            .get(&acct.name)
+            .is_some_and(|h| accounts::usable_hash(h))
+        {
+            log::error!(
+                "not deleting {}: its uid was never recorded and it has a password",
+                acct.name
+            );
+            return Err(Kept::NotOurs);
+        }
     }
     let home = Path::new(&entry.home);
     if home.is_absolute()
@@ -120,7 +152,7 @@ pub fn remove(paths: &Paths, run: &dyn Runner, acct: &Account) -> Result<(), Kep
         log::error!("not deleting {}: odd home path", acct.name);
         return Err(Kept::NotOurs);
     }
-    if run_logged(run, USERDEL, &["-r", &acct.name]) {
+    if run_logged(run, USERDEL, &["-r", "--", &acct.name]) {
         log::info!("deleted the half-made account {}", acct.name);
         Ok(())
     } else {
@@ -132,13 +164,21 @@ pub fn remove(paths: &Paths, run: &dyn Runner, acct: &Account) -> Result<(), Kep
 mod tests {
     use super::*;
     use crate::fake::Fake;
-    use wizard_core::state::Stage;
 
     fn acct(uid: u32) -> Account {
         Account {
             name: "ada".into(),
             uid,
             stage: Stage::Created,
+        }
+    }
+
+    /// Started, uid never recorded.
+    fn creating() -> Account {
+        Account {
+            name: "ada".into(),
+            uid: 0,
+            stage: Stage::Creating,
         }
     }
 
@@ -179,7 +219,7 @@ mod tests {
         let (t, p) = root(None);
         let f = Fake::new(&p);
         remove(&p, &f, &acct(1000)).unwrap();
-        assert_eq!(f.calls(), ["/usr/sbin/userdel -r ada"]);
+        assert_eq!(f.calls(), ["/usr/sbin/userdel -r -- ada"]);
         assert!(!t.path().join("home/ada").exists());
     }
 
@@ -189,7 +229,41 @@ mod tests {
             return;
         }
         let (_t, p) = root(None);
-        remove(&p, &Fake::new(&p), &acct(0)).unwrap();
+        remove(&p, &Fake::new(&p), &creating()).unwrap();
+    }
+
+    #[test]
+    fn unknown_uid_never_deletes_an_account_with_a_password() {
+        // a name taken between the check and `useradd`, or an account the
+        // user made by hand: it has a password, so it is not half-made
+        let (t, p) = root(None);
+        fs::write(p.shadow(), "ada:$y$j9T$abc$def:1:::::::\n").unwrap();
+        let f = Fake::new(&p);
+        assert_eq!(remove(&p, &f, &creating()), Err(Kept::NotOurs));
+        assert!(f.calls().is_empty());
+        assert!(t.path().join("home/ada").exists());
+    }
+
+    #[test]
+    fn uid_zero_is_a_wildcard_only_while_creating() {
+        let (_t, p) = root(None);
+        let f = Fake::new(&p);
+        assert_eq!(remove(&p, &f, &acct(0)), Err(Kept::NotOurs));
+        assert!(f.calls().is_empty());
+    }
+
+    #[test]
+    fn an_odd_name_in_the_state_never_reaches_userdel() {
+        let (_t, p) = root(None);
+        let f = Fake::new(&p);
+        for name in ["-r", "--help", "Ada", "a:b", ""] {
+            let a = Account {
+                name: name.into(),
+                ..creating()
+            };
+            assert_eq!(remove(&p, &f, &a), Err(Kept::NotOurs), "{name:?}");
+        }
+        assert!(f.calls().is_empty());
     }
 
     #[test]
@@ -217,7 +291,7 @@ mod tests {
         let (_t, p) = root(None);
         fs::write(p.passwd(), "ada:x:500:500::/home/ada:/bin/bash\n").unwrap();
         let f = Fake::new(&p);
-        assert_eq!(remove(&p, &f, &acct(0)), Err(Kept::NotOurs));
+        assert_eq!(remove(&p, &f, &creating()), Err(Kept::NotOurs));
         assert!(f.calls().is_empty());
     }
 

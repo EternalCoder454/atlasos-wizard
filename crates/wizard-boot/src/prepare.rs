@@ -96,6 +96,19 @@ fn gather(paths: &Paths, loaded: &mut Option<Loaded>) -> Result<BootInput, Gathe
     })
 }
 
+/// Removes the temp files an earlier crash left beside the state and the
+/// setup autologin. Nothing else writes there before the login screen.
+fn remove_stale_temps(paths: &Paths) {
+    for file in [paths.state_file(), paths.dropin()] {
+        let Some(dir) = file.parent() else { continue };
+        match wizard_core::fsutil::remove_stale_temps(dir) {
+            Ok(0) => {}
+            Ok(n) => log::info!("removed {n} temp file(s) left in {}", dir.display()),
+            Err(e) => log::warn!("could not clear temp files in {}: {e}", dir.display()),
+        }
+    }
+}
+
 /// Writes the done markers that are missing; a failure is logged.
 fn write_markers(paths: &Paths) {
     match markers::write_missing(paths.root(), SystemTime::now()) {
@@ -180,6 +193,7 @@ fn act(paths: &Paths, run: &dyn Runner, action: BootAction) -> &'static str {
 
 /// Runs `prepare`. Always returns normally; see the module comment.
 pub fn run(paths: &Paths, run: &dyn Runner) -> &'static str {
+    remove_stale_temps(paths);
     let mut loaded = None;
     let input = match gather(paths, &mut loaded) {
         Ok(i) => i,

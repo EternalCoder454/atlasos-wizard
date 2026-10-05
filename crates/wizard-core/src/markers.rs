@@ -58,26 +58,33 @@ impl Present {
     }
 }
 
-/// Which markers exist under `root`.
+/// A marker counts as there when it exists, and also when it cannot be
+/// checked (`try_exists` fails: EACCES, SELinux, I/O error), so a stat
+/// failure never reopens setup on a finished machine.
+fn there(path: &Path) -> bool {
+    path.try_exists().unwrap_or_else(|e| {
+        log::error!("cannot check {}: {e}; counting it as there", path.display());
+        true
+    })
+}
+
+/// Which markers exist under `root` (fail-closed: one that cannot be checked
+/// counts as there).
 pub fn present(root: &Path) -> Present {
     Present {
-        atlas: atlas_path(root).exists(),
-        plasma: plasma_path(root).exists(),
+        atlas: there(&atlas_path(root)),
+        plasma: there(&plasma_path(root)),
     }
 }
 
-/// True when either marker exists: setup is done.
+/// True when either marker exists, or cannot be checked: setup is done.
 pub fn is_done(root: &Path) -> bool {
     present(root).any()
 }
 
-/// Fail-closed `is_done` for the root helper: setup counts as done when a
-/// marker exists, and also when a marker cannot be checked (`try_exists`
-/// fails: EACCES, SELinux, I/O error), so a stat failure never reopens setup.
+/// [`is_done`]; the name the root helper uses, to say it is fail-closed.
 pub fn is_done_or_unknown(root: &Path) -> bool {
-    [atlas_path(root), plasma_path(root)]
-        .iter()
-        .any(|p| p.try_exists().unwrap_or(true))
+    is_done(root)
 }
 
 /// Writes (replaces) `/etc/atlasos/setup-done`, atomically, mode 0644.
@@ -218,6 +225,18 @@ mod tests {
         assert_eq!(fs::read(plasma_path(d.path())).unwrap(), before);
         assert!(present(d.path()).both());
         write_missing(d.path(), t()).unwrap();
+    }
+
+    #[test]
+    fn marker_that_cannot_be_checked_counts_as_there() {
+        let d = tempfile::tempdir().unwrap();
+        // /etc/atlasos is a file: stat of etc/atlasos/setup-done fails with
+        // ENOTDIR, not NotFound
+        fs::create_dir_all(d.path().join("etc")).unwrap();
+        fs::write(d.path().join("etc/atlasos"), b"").unwrap();
+        let p = present(d.path());
+        assert!(p.atlas && !p.plasma);
+        assert!(is_done(d.path()) && is_done_or_unknown(d.path()));
     }
 
     #[test]

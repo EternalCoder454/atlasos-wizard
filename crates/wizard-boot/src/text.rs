@@ -18,6 +18,8 @@ pub const CREATING: &str = "Creating the account...";
 pub const DONE: &str = "Your account is ready. Starting the login screen...";
 pub const ALREADY_SET_UP: &str = "This computer is already set up. Starting the login screen...";
 pub const WAITING_FOR_INPUT: &str = "No input. Waiting...";
+pub const NO_ECHO_OFF: &str =
+    "The password cannot be typed safely here (the terminal would show it). Trying again...";
 
 pub fn create_failed(reason: &str) -> String {
     format!("The account could not be created: {reason}\nLet's try again.")
@@ -47,7 +49,7 @@ pub fn full_name_error(e: FullNameError) -> &'static str {
     match e {
         FullNameError::TooLong => "The name can be at most 255 bytes.",
         FullNameError::BadChar => "The name cannot have a colon, a comma or an equals sign.",
-        FullNameError::Control => "The name cannot have control characters.",
+        FullNameError::Control => "The name cannot have control or invisible characters.",
     }
 }
 

@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use tokio::sync::Mutex;
-use wizard_core::accounts::{self, UID_MAX, UID_MIN};
+use wizard_core::accounts::{self, UID_MAX, UID_MIN, VerifyError};
 use wizard_core::choices::{self, Choices};
 use wizard_core::markers;
 use wizard_core::password;
@@ -28,7 +28,7 @@ use crate::paths::Paths;
 /// The whole of `CreateAccount` must end within this.
 pub const CREATE_TIMEOUT: Duration = Duration::from_secs(120);
 /// `Finish` must end within this (the child has 60 s of it).
-pub const FINISH_TIMEOUT: Duration = Duration::from_secs(100);
+pub const FINISH_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// `finish` state: the account's settings are being written.
 pub const FINISH_SETTINGS: &str = "settings";
@@ -58,6 +58,7 @@ pub struct Core {
     /// One call at a time; a second one waits here.
     gate: Mutex<()>,
     create_timeout: Duration,
+    finish_timeout: Duration,
 }
 
 /// Runs `fut` for at most `limit`.
@@ -112,12 +113,19 @@ impl Core {
             applier,
             gate: Mutex::new(()),
             create_timeout: CREATE_TIMEOUT,
+            finish_timeout: FINISH_TIMEOUT,
         }
     }
 
     /// Another limit for `CreateAccount` (tests).
     pub fn with_create_timeout(mut self, limit: Duration) -> Core {
         self.create_timeout = limit;
+        self
+    }
+
+    /// Another limit for `Finish` (tests).
+    pub fn with_finish_timeout(mut self, limit: Duration) -> Core {
+        self.finish_timeout = limit;
         self
     }
 
@@ -292,17 +300,39 @@ impl Core {
         );
         // an unknown stage (from a newer wizard) counts as verified when the
         // account checks out, and as half-made when it does not
-        if !known_half_made && accounts::verify(self.paths.root(), &acc.name, acc.uid).is_ok() {
-            return Err(HelperError::invalid(
-                "account-exists",
-                "An account was already created.",
-            ));
-        }
-        if acc.stage == Stage::Verified {
-            return Err(HelperError::invalid(
-                "account-exists",
-                "An account was already created.",
-            ));
+        if !known_half_made {
+            match accounts::verify(self.paths.root(), &acc.name, acc.uid) {
+                Ok(()) => {
+                    return Err(HelperError::invalid(
+                        "account-exists",
+                        "An account was already created.",
+                    ));
+                }
+                // passwd no longer has the account (an /etc reset, an admin's
+                // userdel): the note is stale, as boot and the fallback treat it
+                Err(e @ (VerifyError::NoPasswdEntry | VerifyError::UidMismatch))
+                    if acc.stage == Stage::Verified =>
+                {
+                    log::warn!(
+                        "the verified account ({}, uid {}) is gone ({}); clearing the note",
+                        acc.name,
+                        acc.uid,
+                        e.code()
+                    );
+                    st.account = None;
+                    return self.save_state(st);
+                }
+                // unreadable or incomplete files: refuse, never guess
+                Err(e) if acc.stage == Stage::Verified => {
+                    log::error!("verified account cannot be checked: {}", e.code());
+                    return Err(HelperError::invalid(
+                        "account-exists",
+                        "An account was already created.",
+                    ));
+                }
+                // an unknown stage that does not check out counts as half-made
+                Err(_) => {}
+            }
         }
         log::warn!(
             "a half-made account ({:?}, uid {}) is in the way; deleting it",
@@ -401,7 +431,7 @@ impl Core {
     /// Writes the account's settings and finishes setup.
     pub async fn finish(&self, choice_map: ChoiceMap) -> Result<(), HelperError> {
         log::info!("Finish: start");
-        let r = within(FINISH_TIMEOUT, "Finish", async {
+        let r = within(self.finish_timeout, "Finish", async {
             let _one = self.gate.lock().await;
             self.finish_locked(choice_map).await
         })
@@ -513,6 +543,11 @@ impl Core {
         match std::fs::remove_file(self.paths.setup_autologin()) {
             Ok(()) => {
                 log::info!("removed the setup autologin");
+                if let Some(dir) = self.paths.setup_autologin().parent()
+                    && let Err(e) = wizard_core::fsutil::sync_dir(dir)
+                {
+                    log::error!("cannot sync the autologin directory: {}", e.kind());
+                }
                 true
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
@@ -610,7 +645,7 @@ impl Core {
 
     /// What of the setup user's clean-up is not in place: the autologin
     /// drop-in is gone, its account is expired (shadow expire field 0 or a
-    /// day already past) and its shell is `nologin`. Anything unreadable
+    /// day already past) and its shell is not a login shell. Anything unreadable
     /// counts as not in place.
     fn cleanup_gaps(&self) -> Vec<&'static str> {
         let mut gaps = Vec::new();
@@ -639,7 +674,7 @@ impl Core {
             .is_some_and(|t| {
                 accounts::parse_passwd(&t)
                     .iter()
-                    .any(|e| e.name == user && e.shell == "/usr/sbin/nologin")
+                    .any(|e| e.name == user && !accounts::login_shell(&e.shell))
             });
         if !nologin {
             gaps.push("shell-not-nologin");

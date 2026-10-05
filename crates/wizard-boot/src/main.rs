@@ -53,6 +53,14 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         "fallback" => {
+            // The password is typed into this process: no core dump of it,
+            // whatever the system's core pattern (the unit also sets
+            // LimitCORE=0). Not fatal: the account matters more.
+            if let Err(e) = rustix::process::set_dumpable_behavior(
+                rustix::process::DumpableBehavior::NotDumpable,
+            ) {
+                log::error!("cannot turn core dumps off: {e}");
+            }
             sig::install();
             let mut tty = Tty::new();
             match fallback::run(&paths, run.as_ref(), &mut tty) {

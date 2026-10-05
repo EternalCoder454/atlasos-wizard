@@ -227,7 +227,11 @@ fn create(
         }
         Err(reason)
     };
-    if !run_logged(run, USERADD, &["-m", "-U", "-G", "wheel", "-c", full, user]) {
+    if !run_logged(
+        run,
+        USERADD,
+        &["-m", "-U", "-G", "wheel", "-c", full, "--", user],
+    ) {
         return failed(text::REASON_USERADD, state);
     }
     let Some(uid) = find_uid(paths, user) else {
@@ -461,7 +465,7 @@ mod tests {
         let calls = f.calls();
         assert_eq!(
             calls[0],
-            "/usr/sbin/useradd -m -U -G wheel -c Ada Lovelace ada"
+            "/usr/sbin/useradd -m -U -G wheel -c Ada Lovelace -- ada"
         );
         assert_eq!(calls[1], "/usr/sbin/chpasswd -e");
         assert!(
@@ -547,7 +551,7 @@ mod tests {
         assert_eq!(run(&p, &f, &mut c), Outcome::Terminated);
         let calls = f.calls();
         assert!(
-            calls.contains(&"/usr/sbin/userdel -r ada".to_string()),
+            calls.contains(&"/usr/sbin/userdel -r -- ada".to_string()),
             "{calls:?}"
         );
         assert!(!fs::read_to_string(p.passwd()).unwrap().contains("ada:"));
@@ -685,7 +689,7 @@ mod tests {
         let f = Fake::new(&p);
         let mut c = Script::new(vec![Input::Terminated]);
         assert_eq!(run(&p, &f, &mut c), Outcome::Terminated);
-        assert_eq!(f.calls(), ["/usr/sbin/userdel -r ada"]);
+        assert_eq!(f.calls(), ["/usr/sbin/userdel -r -- ada"]);
     }
 
     #[test]

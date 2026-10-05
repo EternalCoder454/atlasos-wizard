@@ -30,6 +30,15 @@ impl Fake {
         }
     }
 
+    /// The uid passwd gives `name`.
+    fn uid_of(&self, name: &str) -> Option<u32> {
+        let text = fs::read_to_string(self.paths.passwd()).ok()?;
+        wizard_core::accounts::parse_passwd(&text)
+            .into_iter()
+            .find(|e| e.name == name)
+            .map(|e| e.uid)
+    }
+
     /// Makes every call of the program with this base name fail (after
     /// being recorded, without effect).
     #[must_use]
@@ -230,6 +239,12 @@ impl Runner for Fake {
             "userdel" => self.userdel(args),
             "chage" => self.chage(args),
             "usermod" => self.usermod(args),
+            // logind drops the user's state file once its processes are gone
+            "loginctl" if args.first() == Some(&"terminate-user") => {
+                if let Some(uid) = args.last().and_then(|n| self.uid_of(n)) {
+                    let _ = fs::remove_file(self.paths.logind_user(uid));
+                }
+            }
             _ => {}
         }
         Ok(())

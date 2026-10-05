@@ -1,45 +1,48 @@
 #!/bin/sh
 # The setup session (plasmalogin autologin, atlas-wizard.desktop): KWin alone
-# with the wizard as its only client. Counts starts that did not end well this
-# boot; at 3 it asks the helper to give up (the text-mode fallback takes over). If
-# that fails it logs, waits and exits non-zero; on SetupDone it calls EndSetup.
+# with the wizard as its only client. Counts the starts of this boot that did
+# not end with setup done; at 3 it asks the helper to give up (the text-mode
+# fallback takes over). If that fails it logs, waits and exits non-zero; on
+# SetupDone it calls EndSetup. After 10 failed GiveUp calls it asks logind to
+# reboot: the boot count then reaches the boot fallback row.
 
 dir=/run/atlas-setup
 counter=$dir/session-failures
+tries_file=$dir/giveup-tries
+log() {
+    logger -t atlas-wizard-session "$1" 2>/dev/null
+}
 
-failures=0
-if [ -r "$counter" ]; then
-    read -r failures <"$counter" 2>/dev/null
-fi
-case $failures in
-'' | *[!0-9]*) failures=0 ;;
-esac
-
-write_count_to() {
-    # temp file and rename: a cut never leaves half a number
-    printf '%s\n' "$2" >"$1.tmp" 2>/dev/null && mv -f "$1.tmp" "$1" 2>/dev/null
+# A count from a file, digits only; anything else is 0, and more than four
+# digits (written by hand) counts as "many".
+read_count() {
+    n=0
+    if [ -r "$1" ]; then
+        read -r n <"$1" 2>/dev/null
+    fi
+    case $n in
+    '' | *[!0-9]*) n=0 ;;
+    ?????*) n=9999 ;;
+    esac
+    echo "$n"
 }
 
 write_count() {
-    write_count_to "$counter" "$1"
+    # temp file and rename: a cut never leaves half a number
+    printf '%s\n' "$2" 2>/dev/null >"$1.tmp" && mv -f "$1.tmp" "$1" 2>/dev/null
 }
 
-if [ "$failures" -ge 3 ]; then
-    tries_file=$dir/giveup-tries
-    tries=0
-    if [ -r "$tries_file" ]; then
-        read -r tries <"$tries_file" 2>/dev/null
-    fi
-    case $tries in
-    '' | *[!0-9]*) tries=0 ;;
-    esac
+give_up() {
+    tries=$(read_count "$tries_file")
     if [ "$tries" -ge 10 ]; then
-        # Stop plasmalogin respawning this session; a reboot takes the boot
-        # fallback.
-        logger -t atlas-wizard-session "GiveUp failed 10 times; waiting for a reboot (text-mode fallback)" 2>/dev/null
+        log "GiveUp failed 10 times; rebooting (the boot count leads to the text-mode fallback)"
+        systemctl reboot >/dev/null 2>&1 ||
+            log "the reboot was refused; waiting for one (text-mode fallback after it)"
+        # Stop plasmalogin respawning this session either way.
         sleep infinity
     fi
-    write_count_to "$tries_file" $((tries + 1))
+    write_count "$tries_file" $((tries + 1)) ||
+        log "cannot write $tries_file"
     err=$(busctl --system call net.eterneon.atlas.WizardHelper \
         /net/eterneon/atlas/WizardHelper net.eterneon.atlas.WizardHelper1 GiveUp 2>&1)
     rc=$?
@@ -59,7 +62,7 @@ if [ "$failures" -ge 3 ]; then
         err="EndSetup failed after SetupDone: $err"
         ;;
     esac
-    logger -t atlas-wizard-session "GiveUp failed (busctl exit $rc): $err" 2>/dev/null
+    log "GiveUp failed (busctl exit $rc): $err"
     # Wait before failing, so a restart loop cannot spin: 5 s after the first
     # failure, 15 s after the second, then 30 s (about 5 minutes in all).
     case $tries in
@@ -68,10 +71,20 @@ if [ "$failures" -ge 3 ]; then
     *) sleep 30 ;;
     esac
     exit 1
+}
+
+failures=$(read_count "$counter")
+if [ "$failures" -ge 3 ]; then
+    give_up
 fi
 
-# Counted before the start; reset below when the wizard exits cleanly.
-write_count $((failures + 1))
+# Counted before the start, and reset only when setup is done: a wizard that
+# exits 0 without finishing is a failed start too. A count that cannot be
+# written would never reach 3, so that start gives up at once.
+if ! write_count "$counter" $((failures + 1)); then
+    log "cannot write $counter; giving up on the graphical setup"
+    give_up
+fi
 
 XDG_SESSION_TYPE=wayland
 XDG_CURRENT_DESKTOP=KDE
@@ -101,7 +114,10 @@ if kill -0 "$pid" 2>/dev/null; then
     wait "$pid"
     status=$?
 fi
-if [ "$status" -eq 0 ]; then
-    write_count 0
+if [ -e /etc/atlasos/setup-done ] || [ -e /etc/plasma-setup-done ]; then
+    write_count "$counter" 0
+else
+    # plasmalogin relogs at once (Relogin=true): never faster than this
+    sleep 2
 fi
 exit "$status"

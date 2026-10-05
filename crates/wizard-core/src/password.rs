@@ -10,7 +10,7 @@
 
 use std::ffi::{CStr, c_char, c_int, c_ulong, c_void};
 use std::ptr;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::OnceLock;
 use zeroize::{Zeroize, Zeroizing};
 
 /// Shortest password, in characters (not bytes).
@@ -54,9 +54,10 @@ const PWQ_ERROR_CRACKLIB_CHECK: c_int = -22;
 /// path and no (translated) message to compare.
 const DICT_PROBE: &CStr = c"Wq7#zK2!vR9$mX4%";
 
-/// The missing-dictionary warning is logged once per process, not on every
-/// key press.
-static DICT_WARNED: AtomicBool = AtomicBool::new(false);
+/// Whether the system dictionary is missing, probed once per process (the
+/// strength meter checks on every key press; a probe is a second full check).
+/// The missing-dictionary error is logged with it, once.
+static SYSTEM_DICT_MISSING: OnceLock<bool> = OnceLock::new();
 
 #[link(name = "crypt")]
 unsafe extern "C" {
@@ -265,6 +266,22 @@ impl Drop for Settings {
     }
 }
 
+/// True when cracklib refuses a password no dictionary holds: it cannot read
+/// its dictionary.
+fn dict_missing(settings: &Settings) -> bool {
+    // SAFETY: valid settings and a NUL-terminated probe.
+    let probe = unsafe {
+        pwquality_check(
+            settings.0,
+            DICT_PROBE.as_ptr(),
+            ptr::null(),
+            ptr::null(),
+            ptr::null_mut(),
+        )
+    };
+    probe == PWQ_ERROR_CRACKLIB_CHECK
+}
+
 fn pwquality(password: &[u8], user: &str) -> Result<Score, PasswordError> {
     pwquality_with(password, user, None)
 }
@@ -296,23 +313,20 @@ fn pwquality_with(
     }
     // A missing or unreadable dictionary would refuse every password, so no
     // account could be made: skip only the dictionary check then, and say so.
-    // SAFETY: valid settings and a NUL-terminated probe.
-    let probe = unsafe {
-        pwquality_check(
-            settings.0,
-            DICT_PROBE.as_ptr(),
-            ptr::null(),
-            ptr::null(),
-            ptr::null_mut(),
-        )
+    let missing = match dict_path {
+        None => *SYSTEM_DICT_MISSING.get_or_init(|| {
+            let missing = dict_missing(&settings);
+            if missing {
+                log::error!(
+                    "the password dictionary cannot be read (cracklib-dicts missing?); \
+                     checking passwords without it"
+                );
+            }
+            missing
+        }),
+        Some(_) => dict_missing(&settings),
     };
-    if probe == PWQ_ERROR_CRACKLIB_CHECK {
-        if !DICT_WARNED.swap(true, Ordering::Relaxed) {
-            log::warn!(
-                "the password dictionary cannot be read (cracklib-dicts missing?); \
-                 checking passwords without it"
-            );
-        }
+    if missing {
         // SAFETY: valid settings.
         if unsafe { pwquality_set_int_value(settings.0, PWQ_SETTING_DICT_CHECK, 0) } != 0 {
             return Err(PasswordError::Unavailable);

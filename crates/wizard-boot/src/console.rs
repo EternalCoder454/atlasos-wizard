@@ -8,7 +8,7 @@ use rustix::io::Errno;
 use rustix::termios::{LocalModes, OptionalActions, Termios, tcgetattr, tcsetattr};
 use std::io::Write;
 use std::time::Duration;
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 
 /// What a prompt returned.
 pub enum Input {
@@ -48,14 +48,20 @@ struct EchoOff {
 }
 
 impl EchoOff {
-    /// `None` when stdin is not a terminal (a pipe in tests).
-    fn new() -> Option<EchoOff> {
+    /// `Ok(None)` when stdin is not a terminal (a pipe in tests); an error
+    /// when it is one but echo could not be turned off, so the password is
+    /// never read with echo on.
+    fn new() -> Result<Option<EchoOff>, Errno> {
         let stdin = rustix::stdio::stdin();
-        let saved = tcgetattr(stdin).ok()?;
+        let saved = match tcgetattr(stdin) {
+            Ok(t) => t,
+            Err(Errno::NOTTY) => return Ok(None),
+            Err(e) => return Err(e),
+        };
         let mut quiet = saved.clone();
         quiet.local_modes.remove(LocalModes::ECHO);
-        tcsetattr(stdin, OptionalActions::Drain, &quiet).ok()?;
-        Some(EchoOff { saved })
+        tcsetattr(stdin, OptionalActions::Drain, &quiet)?;
+        Ok(Some(EchoOff { saved }))
     }
 }
 
@@ -65,10 +71,25 @@ impl Drop for EchoOff {
     }
 }
 
+/// Bytes read in one go.
+const CHUNK: usize = 256;
+
 /// The real console.
-#[derive(Default)]
 pub struct Tty {
+    /// What was read and not yet returned. Its capacity is reserved once, so
+    /// it never moves (a move would leave a copy of a password behind), and
+    /// the bytes of a returned line are wiped.
     pending: Zeroizing<Vec<u8>>,
+}
+
+impl Default for Tty {
+    fn default() -> Tty {
+        Tty {
+            // `read_line` returns a line at MAX_LINE bytes, so `pending` holds
+            // at most MAX_LINE - 1 + CHUNK
+            pending: Zeroizing::new(Vec::with_capacity(MAX_LINE + CHUNK)),
+        }
+    }
 }
 
 impl Tty {
@@ -87,6 +108,8 @@ impl Tty {
     fn take_line(&mut self, upto: usize, skip: usize) -> Input {
         let mut line: Zeroizing<Vec<u8>> = Zeroizing::new(self.pending[..upto].to_vec());
         self.pending.drain(..upto + skip);
+        // `drain` only moves the rest down: wipe what is left past the end
+        self.pending.spare_capacity_mut().zeroize();
         if line.last() == Some(&b'\r') {
             line.pop();
         }
@@ -110,7 +133,7 @@ impl Tty {
                 return Input::Hangup;
             }
             if sig::take_interrupt() {
-                self.pending.clear();
+                self.pending.zeroize();
                 return Input::Interrupted;
             }
             // Wake once a second to look at the signal flags: a signal that
@@ -129,7 +152,7 @@ impl Tty {
                     return self.eof();
                 }
             }
-            let mut chunk = Zeroizing::new([0u8; 256]);
+            let mut chunk = Zeroizing::new([0u8; CHUNK]);
             match rustix::io::read(stdin, &mut chunk[..]) {
                 Ok(0) => {
                     if !self.pending.is_empty() {
@@ -166,7 +189,15 @@ impl Console for Tty {
 
     fn ask_secret(&mut self, prompt: &str) -> Input {
         self.print(prompt);
-        let guard = EchoOff::new();
+        let guard = match EchoOff::new() {
+            Ok(g) => g,
+            Err(e) => {
+                log::error!("cannot turn echo off on the terminal: {e}");
+                self.print("\n");
+                self.say(crate::text::NO_ECHO_OFF);
+                return self.eof();
+            }
+        };
         let input = self.read_line();
         drop(guard);
         // The Enter key was not echoed.

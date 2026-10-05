@@ -142,7 +142,9 @@ pub enum FullNameError {
     TooLong,
     /// Holds `:`, `,` or `=` (they break passwd and the GECOS field).
     BadChar,
-    /// Holds a newline or another control character.
+    /// Holds a newline or another control character, or an invisible
+    /// format character that can disguise the name (bidi controls,
+    /// zero-width space, BOM, tags).
     Control,
 }
 
@@ -167,7 +169,7 @@ pub fn full_name(name: &str) -> Result<&str, FullNameError> {
         return Err(FullNameError::TooLong);
     }
     for c in name.chars() {
-        if c.is_control() || c == '\u{2028}' || c == '\u{2029}' {
+        if c.is_control() || c == '\u{2028}' || c == '\u{2029}' || disguising(c) {
             return Err(FullNameError::Control);
         }
         if matches!(c, ':' | ',' | '=') {
@@ -175,6 +177,17 @@ pub fn full_name(name: &str) -> Result<&str, FullNameError> {
         }
     }
     Ok(name)
+}
+
+/// Format characters (Unicode Cf) that only change how a name looks: bidi
+/// controls (a name shown backwards on the login screen), zero-width and
+/// other invisible ones. ZWJ and ZWNJ (U+200C, U+200D) stay: names in
+/// Persian, the Indic scripts and emoji sequences need them.
+fn disguising(c: char) -> bool {
+    matches!(c,
+        '\u{00AD}' | '\u{061C}' | '\u{180E}' | '\u{200B}' | '\u{200E}' | '\u{200F}'
+        | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{206F}'
+        | '\u{FEFF}' | '\u{FFF9}'..='\u{FFFB}' | '\u{E0000}'..='\u{E007F}')
 }
 
 /// Proposes a user name from a full name: the first word that leaves
@@ -350,6 +363,26 @@ mod tests {
         assert_eq!(full_name("a\tb"), Err(FullNameError::Control));
         assert_eq!(full_name("a\u{7f}b"), Err(FullNameError::Control));
         assert_eq!(full_name("a\u{0}b"), Err(FullNameError::Control));
+        for c in [
+            '\u{202E}',
+            '\u{2066}',
+            '\u{200B}',
+            '\u{FEFF}',
+            '\u{E0041}',
+            '\u{00AD}',
+        ] {
+            assert_eq!(
+                full_name(&format!("Ada{c}x")),
+                Err(FullNameError::Control),
+                "{c:?}"
+            );
+        }
+        // joiners are part of real names
+        assert_eq!(
+            full_name("\u{0645}\u{06CC}\u{200C}\u{0634}\u{0648}\u{062F}"),
+            Ok("\u{0645}\u{06CC}\u{200C}\u{0634}\u{0648}\u{062F}")
+        );
+        assert!(full_name("\u{1F469}\u{200D}\u{1F4BB}").is_ok());
         assert_eq!(full_name(&"a".repeat(255)), Ok("a".repeat(255).as_str()));
         assert_eq!(full_name(&"a".repeat(256)), Err(FullNameError::TooLong));
         // Bytes, not chars: 128 two-byte chars is 256 bytes.
