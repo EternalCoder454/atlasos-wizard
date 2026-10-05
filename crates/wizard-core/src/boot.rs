@@ -47,6 +47,9 @@ pub struct BootInput {
     pub humans: Vec<Human>,
     /// The loaded state.
     pub state: State,
+    /// `accounts::verify` passed for the state's account (false when there
+    /// is none). Only consulted for a stage this version does not know.
+    pub state_account_verifies: bool,
 }
 
 /// What `prepare` does.
@@ -77,7 +80,14 @@ pub enum BootAction {
 /// is missing or lacks a hash is half-made, so this is false for it.
 fn verified_and_present(input: &BootInput) -> bool {
     input.state.account.as_ref().is_some_and(|a| {
-        a.stage == Stage::Verified
+        let stage_ok = match &a.stage {
+            Stage::Verified => true,
+            // A stage from a newer version counts as verified only when the
+            // caller's `accounts::verify` passed.
+            Stage::Unknown(_) => input.state_account_verifies,
+            _ => false,
+        };
+        stage_ok
             && input
                 .humans
                 .iter()
@@ -340,9 +350,9 @@ mod tests {
     #[test]
     fn half_made_stages_are_not_resumed() {
         for st in [Stage::Creating, Stage::Created, Stage::PasswordSet] {
-            assert_eq!(decide(&input(1, acct(st), vec![])), RUN, "{st:?}");
+            assert_eq!(decide(&input(1, acct(st.clone()), vec![])), RUN, "{st:?}");
             assert_eq!(
-                decide(&input(3, acct(st), vec![])),
+                decide(&input(3, acct(st.clone()), vec![])),
                 BootAction::Fallback,
                 "{st:?}"
             );
@@ -350,6 +360,32 @@ mod tests {
         // Password set means a hash exists, so the account may already be
         // listed; with the state naming it, it is still half-made, not foreign.
         let i = input(1, acct(Stage::PasswordSet), vec![human("ada", 1000)]);
+        assert_eq!(decide(&i), RUN);
+    }
+
+    fn unknown(verifies: bool, boots: u32) -> BootInput {
+        let mut i = input(
+            boots,
+            acct(Stage::Unknown("sealed-v2".into())),
+            vec![human("ada", 1000)],
+        );
+        i.state_account_verifies = verifies;
+        i
+    }
+
+    #[test]
+    fn unknown_stage_that_verifies_acts_verified() {
+        assert_eq!(decide(&unknown(true, 1)), RESUME);
+        assert_eq!(decide(&unknown(true, 3)), BootAction::FinishWithDefaults);
+    }
+
+    #[test]
+    fn unknown_stage_that_does_not_verify_is_half_made() {
+        assert_eq!(decide(&unknown(false, 1)), RUN);
+        assert_eq!(decide(&unknown(false, 3)), BootAction::Fallback);
+        // Verifies but is not a listed human (no hash): still half-made.
+        let mut i = input(1, acct(Stage::Unknown("x".into())), vec![]);
+        i.state_account_verifies = true;
         assert_eq!(decide(&i), RUN);
     }
 

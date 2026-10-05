@@ -27,23 +27,53 @@ fn format_one() -> u32 {
 }
 
 /// How far the account got. Written before and after each helper step.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+/// A stage this version does not know (written by a newer wizard) is kept
+/// as [`Stage::Unknown`] and written back unchanged.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
 pub enum Stage {
-    /// AccountsService `CreateUser` is running.
+    /// AccountsService `CreateUser` is running (`creating`).
     Creating,
-    /// The user exists.
+    /// The user exists (`created`).
     Created,
-    /// The password hash is set.
+    /// The password hash is set (`password-set`).
     PasswordSet,
-    /// passwd, shadow, wheel and home all checked.
+    /// passwd, shadow, wheel and home all checked (`verified`).
     Verified,
+    /// A stage name from a newer version.
+    Unknown(String),
+}
+
+impl From<String> for Stage {
+    fn from(s: String) -> Stage {
+        match s.as_str() {
+            "creating" => Stage::Creating,
+            "created" => Stage::Created,
+            "password-set" => Stage::PasswordSet,
+            "verified" => Stage::Verified,
+            _ => Stage::Unknown(s),
+        }
+    }
+}
+
+impl From<Stage> for String {
+    fn from(s: Stage) -> String {
+        match s {
+            Stage::Creating => "creating".into(),
+            Stage::Created => "created".into(),
+            Stage::PasswordSet => "password-set".into(),
+            Stage::Verified => "verified".into(),
+            Stage::Unknown(s) => s,
+        }
+    }
 }
 
 impl Stage {
-    /// True for the stages that leave a half-made account.
-    pub fn is_half_made(self) -> bool {
-        self != Stage::Verified
+    /// True for the stages that leave a half-made account. An unknown stage
+    /// counts as half-made here; the boot decision upgrades it when the
+    /// account verifies.
+    pub fn is_half_made(&self) -> bool {
+        *self != Stage::Verified
     }
 }
 
@@ -259,6 +289,26 @@ mod tests {
     }
 
     #[test]
+    fn unknown_stage_is_kept_and_round_trips() {
+        let d = dir();
+        let p = d.path().join("state.json");
+        fs::write(
+            &p,
+            r#"{"format":2,"account":{"name":"ada","uid":1000,"stage":"sealed-v2"}}"#,
+        )
+        .unwrap();
+        let l = load(&p).unwrap();
+        assert_eq!(l.warning, None);
+        let a = l.state.account.clone().unwrap();
+        assert_eq!(a.stage, Stage::Unknown("sealed-v2".into()));
+        assert!(a.stage.is_half_made());
+        l.state.save(&p).unwrap();
+        let v: Value = serde_json::from_slice(&fs::read(&p).unwrap()).unwrap();
+        assert_eq!(v["account"]["stage"], "sealed-v2");
+        assert_eq!(load(&p).unwrap().state, l.state);
+    }
+
+    #[test]
     fn empty_object_and_missing_fields() {
         let s: State = serde_json::from_str("{}").unwrap();
         assert_eq!(s, State::default());
@@ -311,13 +361,7 @@ mod tests {
 
     #[test]
     fn unparsable_is_moved_aside() {
-        for bad in [
-            "not json",
-            "[1,2]",
-            r#"{"boots":"many"}"#,
-            r#"{"account":{"stage":"weird","name":"a","uid":1}}"#,
-            "",
-        ] {
+        for bad in ["not json", "[1,2]", r#"{"boots":"many"}"#, ""] {
             let d = dir();
             let p = d.path().join("state.json");
             fs::write(&p, bad).unwrap();
