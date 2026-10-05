@@ -15,12 +15,31 @@ case $failures in
 '' | *[!0-9]*) failures=0 ;;
 esac
 
-write_count() {
+write_count_to() {
     # temp file and rename: a cut never leaves half a number
-    printf '%s\n' "$1" >"$counter.tmp" 2>/dev/null && mv -f "$counter.tmp" "$counter" 2>/dev/null
+    printf '%s\n' "$2" >"$1.tmp" 2>/dev/null && mv -f "$1.tmp" "$1" 2>/dev/null
+}
+
+write_count() {
+    write_count_to "$counter" "$1"
 }
 
 if [ "$failures" -ge 3 ]; then
+    tries_file=$dir/giveup-tries
+    tries=0
+    if [ -r "$tries_file" ]; then
+        read -r tries <"$tries_file" 2>/dev/null
+    fi
+    case $tries in
+    '' | *[!0-9]*) tries=0 ;;
+    esac
+    if [ "$tries" -ge 5 ]; then
+        # Stop plasmalogin respawning this session; a reboot takes the boot
+        # fallback.
+        logger -t atlas-wizard-session "GiveUp failed 5 times; waiting for a reboot (text-mode fallback)" 2>/dev/null
+        sleep infinity
+    fi
+    write_count_to "$tries_file" $((tries + 1))
     err=$(busctl --system call net.eterneon.atlas.WizardHelper \
         /net/eterneon/atlas/WizardHelper net.eterneon.atlas.WizardHelper1 GiveUp 2>&1)
     rc=$?

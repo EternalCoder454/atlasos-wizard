@@ -63,8 +63,9 @@ LimitCORE=0
 #   CAP_FOWNER: the same rewrite keeps the mode (chmod on a file root does
 #     own, so it may be unneeded; the VM test decides, keep it until then).
 #   CAP_DAC_OVERRIDE: root writing /etc/shadow (mode 0000 on Fedora), and
-#     reading the new home to check it. (CAP_DAC_READ_SEARCH is implied by
-#     it, so it is not listed.)
+#     reading the new home to check it. (CAP_DAC_READ_SEARCH is not
+#     needed: CAP_DAC_OVERRIDE covers reads and searches too; the VM test
+#     decides.)
 #   CAP_SETUID, CAP_SETGID: the settings child drops to the new account's uid
 #     and gid before it exec's (and std clears its supplementary groups).
 #   CAP_KILL: killing the settings child's process group after its timeout,

@@ -83,6 +83,11 @@ fn io_failed(what: &str, e: &std::io::Error) -> HelperError {
     HelperError::failed("io", "A file could not be read or written.")
 }
 
+/// Setup moved to the root text-mode fallback: the GUI's calls stop.
+fn gave_up() -> HelperError {
+    HelperError::invalid("gave-up", "Setup moved to text mode.")
+}
+
 /// The uid in `/org/freedesktop/Accounts/User<uid>`.
 fn uid_from_path(path: &str) -> Option<u32> {
     path.strip_prefix("/org/freedesktop/Accounts/User")?
@@ -187,6 +192,9 @@ impl Core {
     ) -> Result<u32, HelperError> {
         if self.setup_done() {
             return Err(HelperError::setup_done());
+        }
+        if self.load_state()?.gave_up {
+            return Err(gave_up());
         }
 
         // Everything that can be refused is refused before AccountsService
@@ -413,6 +421,9 @@ impl Core {
         if self.setup_done() && !resuming {
             return Err(HelperError::setup_done());
         }
+        if st.gave_up && !resuming {
+            return Err(gave_up());
+        }
         let c = choices::validate(&choice_map)
             .map_err(|e| HelperError::invalid(e.code(), "Those choices are not allowed."))?;
 
@@ -536,7 +547,16 @@ impl Core {
     pub async fn end_setup(&self) -> Result<(), HelperError> {
         log::info!("EndSetup: start");
         let _one = self.gate.lock().await;
-        let st = self.load_state()?;
+        let mut st = self.load_state()?;
+        if self.setup_done() && st.finish.as_deref() == Some(FINISH_MARKERS) {
+            // The markers are there but the tail of Finish never ran (a cut,
+            // or GiveUp's session retry): run it now, as Finish would.
+            log::info!("EndSetup: finishing the clean-up after the markers");
+            self.remove_setup_autologin();
+            self.lock_setup_user().await;
+            st.finish = Some(FINISH_DONE.into());
+            self.save_state(&st)?;
+        }
         if st.finish.as_deref() != Some(FINISH_DONE) {
             log::warn!("EndSetup: Finish has not completed");
             return Err(HelperError::failed(

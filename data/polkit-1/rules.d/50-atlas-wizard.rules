@@ -19,9 +19,11 @@ var atlasWizardMarkers = [
 ];
 
 // True only when polkit.spawn confirms that no marker exists. The test also
-// needs the marker's parent directory to exist and be searchable ("-d", "-x",
-// which asks access(2) and so SELinux too): a plain `! -e` is true when stat
-// fails (EACCES, SELinux), which would read as "no marker".
+// needs the marker's parent directory to exist and be searchable ("-d", "-x"):
+// a plain `! -e` is true when stat fails (EACCES), which would read as "no
+// marker". This only proves the parent can be searched: a stat failure on the
+// marker file itself still reads as "no marker", and the helper's fail-closed
+// is_done_or_unknown is the backstop for that.
 // (tmpfiles.d creates /etc/atlasos.) spawn throws on a non-zero exit (a marker
 // exists, or the parent is missing) and when it cannot run: all are "no".
 function atlasWizardSetupOpen() {

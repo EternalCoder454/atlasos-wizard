@@ -983,3 +983,51 @@ async fn give_up_with_an_account_or_a_finish_under_way_starts_the_fallback() {
     }));
     r.core.give_up().await.unwrap();
 }
+
+#[tokio::test]
+async fn end_setup_finishes_the_tail_when_the_markers_exist_but_finish_is_markers() {
+    let r = rig();
+    finished(&r).await;
+    // as if the helper stopped right after writing the markers
+    let mut st = r.state();
+    st.finish = Some(FINISH_MARKERS.into());
+    st.save(&r.core.paths().state()).unwrap();
+    // the session's GiveUp answers setup-done, then EndSetup must work
+    assert_eq!(code(r.core.give_up().await).0, Kind::SetupDone);
+    let before = r.runner.log.lock().unwrap().len();
+    r.core.end_setup().await.unwrap();
+    assert_eq!(r.state().finish.as_deref(), Some(FINISH_DONE));
+    assert_eq!(r.runner.log.lock().unwrap().len(), before + 2, "locked");
+    assert!(r.core.cleanup_gaps().is_empty());
+    assert_eq!(
+        *r.systemd.log.lock().unwrap(),
+        vec!["restart display-manager.service".to_string()]
+    );
+}
+
+#[tokio::test]
+async fn create_account_is_refused_after_giving_up() {
+    let r = rig();
+    r.core.give_up().await.unwrap();
+    let (k, c) = code(r.create("ada", false).await);
+    assert_eq!((k, c.as_str()), (Kind::Invalid, "gave-up"));
+    assert!(r.state().account.is_none());
+}
+
+#[tokio::test]
+async fn finish_is_refused_after_giving_up_unless_resuming_the_markers() {
+    let r = rig();
+    r.create("ada", false).await.unwrap();
+    r.core.give_up().await.unwrap();
+    let (k, c) = code(r.core.finish(ChoiceMap::new()).await);
+    assert_eq!((k, c.as_str()), (Kind::Invalid, "gave-up"));
+    assert!(r.applier.reqs.lock().unwrap().is_empty());
+
+    // markers written, tail missing: Finish may resume despite gave_up
+    markers::write_missing(r.dir.path(), SystemTime::now()).unwrap();
+    let mut st = r.state();
+    st.finish = Some(FINISH_MARKERS.into());
+    st.save(&r.core.paths().state()).unwrap();
+    r.core.finish(ChoiceMap::new()).await.unwrap();
+    assert_eq!(r.state().finish.as_deref(), Some(FINISH_DONE));
+}

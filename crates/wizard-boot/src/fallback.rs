@@ -302,20 +302,37 @@ pub fn run(paths: &Paths, run: &dyn Runner, con: &mut dyn Console) -> Outcome {
         }
     }
 
-    // The state itself says an account was made and verified, or Finish had
-    // begun: finish without asking, even when passwd cannot be read or shows
-    // no human account. Never ask for a second account.
-    if state.finish.is_some()
-        || state
-            .account
-            .as_ref()
-            .is_some_and(|a| a.stage == Stage::Verified)
-    {
-        log::info!("the state records a made account; finishing without asking");
-        con.say(text::ALREADY_SET_UP);
-        finish(paths, run, &mut state);
-        start_display_manager(run);
-        return Outcome::Done;
+    // The state says an account was made and verified: finish without asking
+    // when passwd agrees, or cannot be read (asking might make a second
+    // account). A readable passwd without it means /etc was reset: forget the
+    // note and fall through to ask. `finish` alone proves nothing.
+    if let Some(a) = state.account.clone().filter(|a| a.stage == Stage::Verified) {
+        match accounts::human_accounts(paths.root()) {
+            Ok(h) if h.iter().any(|x| x.name == a.name && x.uid == a.uid) => {
+                log::info!("the state records a made account; finishing without asking");
+                con.say(text::ALREADY_SET_UP);
+                finish(paths, run, &mut state);
+                start_display_manager(run);
+                return Outcome::Done;
+            }
+            Ok(_) => {
+                log::error!(
+                    "the state records account {} but passwd does not list it; setting up again",
+                    a.name
+                );
+                state.account = None;
+                save(paths, &state);
+            }
+            Err(e) => {
+                log::error!(
+                    "cannot read passwd or shadow ({e}) with a verified account in the state; finishing without asking"
+                );
+                con.say(text::ALREADY_SET_UP);
+                finish(paths, run, &mut state);
+                start_display_manager(run);
+                return Outcome::Done;
+            }
+        }
     }
 
     // An account exists (made by the helper before it gave up, or by
@@ -556,10 +573,7 @@ mod tests {
         assert!(markers::present(p.root()).both());
     }
 
-    #[test]
-    fn a_verified_state_account_finishes_without_asking_even_without_passwd_entry() {
-        let (_t, p) = root();
-        // passwd shows no human account (the file is the bare fixture)
+    fn verified_ada(p: &Paths) {
         State {
             account: Some(Account {
                 name: "ada".into(),
@@ -570,15 +584,63 @@ mod tests {
         }
         .save(&p.state_file())
         .unwrap();
+    }
+
+    fn dm_started(f: &Fake) -> bool {
+        f.calls()
+            .contains(&"/usr/bin/systemctl start --no-block display-manager.service".into())
+    }
+
+    #[test]
+    fn a_verified_state_account_in_passwd_finishes_without_asking() {
+        let (_t, p) = root();
+        fs::write(
+            p.passwd(),
+            "root:x:0:0::/root:/bin/bash\nada:x:1000:1000:Ada:/home/ada:/bin/bash\n",
+        )
+        .unwrap();
+        fs::write(
+            p.shadow(),
+            "root:!:1:::::::\nada:$6$salt$hash:19000:0:99999:7:::\n",
+        )
+        .unwrap();
+        verified_ada(&p);
         let f = Fake::new(&p);
         let mut c = Script::new(vec![]);
         assert_eq!(run(&p, &f, &mut c), Outcome::Done);
         assert!(c.prompts.is_empty(), "never asks for a second account");
         assert!(markers::present(p.root()).both());
-        assert!(
-            f.calls()
-                .contains(&"/usr/bin/systemctl start --no-block display-manager.service".into())
-        );
+        assert!(dm_started(&f));
+    }
+
+    #[test]
+    fn a_verified_state_account_missing_from_passwd_asks_again() {
+        if !is_root() {
+            return;
+        }
+        let (_t, p) = root();
+        verified_ada(&p);
+        let f = Fake::new(&p);
+        let mut c = Script::new(vec![line("Ada"), line("ada"), line(GOOD), line(GOOD)]);
+        assert_eq!(run(&p, &f, &mut c), Outcome::Done);
+        assert!(!c.prompts.is_empty(), "asks: no human account exists");
+        assert!(fs::read_to_string(p.passwd()).unwrap().contains("ada:"));
+        assert!(markers::present(p.root()).both());
+        assert!(dm_started(&f));
+    }
+
+    #[test]
+    fn a_verified_state_account_with_unreadable_passwd_finishes_without_asking() {
+        let (_t, p) = root();
+        fs::remove_file(p.passwd()).unwrap();
+        fs::create_dir(p.passwd()).unwrap(); // reading a directory fails
+        verified_ada(&p);
+        let f = Fake::new(&p);
+        let mut c = Script::new(vec![]);
+        assert_eq!(run(&p, &f, &mut c), Outcome::Done);
+        assert!(c.prompts.is_empty());
+        assert!(markers::present(p.root()).both());
+        assert!(dm_started(&f));
     }
 
     #[test]
