@@ -98,14 +98,19 @@ interface `net.eterneon.atlas.WizardHelper1`. Every method:
   its own action (non-interactive);
 - checks the caller's uid is `atlas-setup`'s (from the bus, not an argument);
 - refuses with `net.eterneon.atlas.Error.SetupDone` once `/etc/atlasos/setup-done`
-  exists;
+  exists (`CreateAccount`, `Finish` and `GiveUp`; `EndSetup` runs after the
+  markers and instead needs the state's `finish` to be `done`);
 - validates every argument again with wizard-core (never trusts the GUI);
 - takes no path, command, argv or unit name.
+
+Errors are `net.eterneon.atlas.Error.{NotAuthorized,SetupDone,Invalid,AccountsService,Failed}`,
+with the message `<code>: <English text>`; the GUI splits on the first `: `
+and shows its own translated text for the code.
 
 | Method | Polkit action | Does |
 |---|---|---|
 | `CreateAccount(s name, s full_name, ay password, b autologin) -> u uid` | `net.eterneon.atlas.wizard.create-account` | AccountsService `CreateUser(name, full_name, 1)` (administrator: wheel), then `SetPassword(yescrypt hash, "")` with the hash made in the helper. State stages `creating`, `created`, `password-set`, `verified` are written before and after each step. Verifies the passwd entry, the shadow hash, wheel, and the home owned by the uid. One account per first run: a second call fails unless the state names a half-made account, which is deleted first (only that uid, only when its home holds nothing but skel). The password buffer is zeroed. |
-| `Finish(a{sv} choices)` | `net.eterneon.atlas.wizard.finish` | Writes the new account's settings as that user (below), the autologin drop-in if asked, then the done markers, removes the setup autologin, locks `atlas-setup`. Idempotent: a repeat after a crash finishes the remaining steps. |
+| `Finish(a{sv} choices)` | `net.eterneon.atlas.wizard.finish` | Writes the new account's settings as that user (below), the autologin drop-in if asked, then the done markers, removes the setup autologin, locks `atlas-setup`. Idempotent: a repeat after a crash finishes the remaining steps (state `finish`: `settings`, `autologin`, `markers`, `done`; once the markers exist only the clean-up is redone, and its failures are logged, not returned, since `prepare` redoes it at the next boot). |
 | `EndSetup()` | `net.eterneon.atlas.wizard.finish` | Restarts `display-manager.service` (systemd D-Bus, fixed unit). |
 | `GiveUp()` | `net.eterneon.atlas.wizard.fallback` | Records it in the state, removes the setup autologin, starts `atlas-wizard-fallback.service`. |
 
