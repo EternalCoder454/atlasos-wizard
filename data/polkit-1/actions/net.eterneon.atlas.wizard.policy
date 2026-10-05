@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>Eterneon</vendor>
+  <vendor_url>https://github.com/EternalCoder454/atlasos-wizard</vendor_url>
+
+  <!-- Every default is "no": the only grant is the rule in
+       rules.d/50-atlas-wizard.rules, for the setup user in its own active
+       local session. -->
+
+  <action id="net.eterneon.atlas.wizard.create-account">
+    <description>Create the first user account</description>
+    <message>Authentication is required to create the first user account</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>no</allow_active>
+    </defaults>
+  </action>
+
+  <action id="net.eterneon.atlas.wizard.finish">
+    <description>Finish setting up this computer</description>
+    <message>Authentication is required to finish setting up this computer</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>no</allow_active>
+    </defaults>
+  </action>
+
+  <action id="net.eterneon.atlas.wizard.fallback">
+    <description>Switch setup to text mode</description>
+    <message>Authentication is required to switch setup to text mode</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>no</allow_active>
+    </defaults>
+  </action>
+</policyconfig>

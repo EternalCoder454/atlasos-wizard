@@ -1,0 +1,34 @@
+// AtlasOS Wizard: the setup user, and only it, in its own active local session
+// (the plasmalogin autologin session "atlas-wizard"), may do what setup needs:
+// our helper's three actions, and the stock actions the pages use to apply
+// choices at once. Nothing else is granted, and every action's default stays
+// "no".
+//
+// After setup the user atlas-setup is locked (account expired, no shell) and
+// the setup autologin is removed, so it can have no session and this rule can
+// never match again.
+polkit.addRule(function(action, subject) {
+    var granted = [
+        // the helper (net.eterneon.atlas.WizardHelper)
+        "net.eterneon.atlas.wizard.create-account",
+        "net.eterneon.atlas.wizard.finish",
+        "net.eterneon.atlas.wizard.fallback",
+        // language and keyboard (localed)
+        "org.freedesktop.locale1.set-locale",
+        "org.freedesktop.locale1.set-keyboard",
+        // time zone and clock (timedated)
+        "org.freedesktop.timedate1.set-timezone",
+        "org.freedesktop.timedate1.set-ntp",
+        // host name (hostnamed)
+        "org.freedesktop.hostname1.set-static-hostname",
+        "org.freedesktop.hostname1.set-hostname",
+        // Wi-Fi (NetworkManager)
+        "org.freedesktop.NetworkManager.settings.modify.system",
+        "org.freedesktop.NetworkManager.network-control",
+        "org.freedesktop.NetworkManager.enable-disable-wifi"
+    ];
+    if (granted.indexOf(action.id) >= 0 &&
+        subject.user == "atlas-setup" && subject.local && subject.active) {
+        return polkit.Result.YES;
+    }
+});
