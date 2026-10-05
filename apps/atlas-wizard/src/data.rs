@@ -26,7 +26,7 @@ fn read_text(path: &Path) -> io::Result<String> {
 /// A locale name worth offering: `xx_YY.UTF-8` shape, short, safe characters.
 fn locale_ok(s: &str) -> bool {
     s.len() <= 64
-        && s.contains('_')
+        && (s.contains('_') || s.starts_with("C."))
         && (s.ends_with(".UTF-8") || s.contains(".UTF-8@"))
         && s.chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-' | '@'))
@@ -113,15 +113,27 @@ pub fn builtin_locales() -> Vec<String> {
     .collect()
 }
 
-/// The installed locales, from the archive, else `SUPPORTED`, else the
-/// built-in short list.
+/// UTF-8 locales installed as directories (`/usr/lib/locale/C.utf8`).
+pub fn parse_locale_dirs(dir: &Path) -> Vec<String> {
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    finish_locales(
+        rd.filter_map(Result::ok)
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+            .filter_map(|e| norm_locale(&e.file_name().to_string_lossy()))
+            .collect(),
+    )
+}
+
+/// The installed locales: the archive and the directories together, else
+/// `SUPPORTED`, else the built-in short list.
 pub fn load_locales() -> Vec<String> {
-    if let Ok(mut f) = File::open(LOCALE_ARCHIVE) {
-        match parse_locale_archive(&mut f) {
-            Ok(v) if !v.is_empty() => return v,
-            Ok(_) => log::warn!("{LOCALE_ARCHIVE}: no UTF-8 locales"),
-            Err(e) => log::warn!("{LOCALE_ARCHIVE}: {e}"),
-        }
+    let mut all = parse_locale_dirs(Path::new("/usr/lib/locale"));
+    all.extend(load_archive());
+    let all = finish_locales(all);
+    if !all.is_empty() {
+        return all;
     }
     if let Ok(t) = read_text(Path::new(LOCALE_SUPPORTED)) {
         let v = parse_supported(&t);
@@ -130,6 +142,16 @@ pub fn load_locales() -> Vec<String> {
         }
     }
     builtin_locales()
+}
+
+fn load_archive() -> Vec<String> {
+    if let Ok(mut f) = File::open(LOCALE_ARCHIVE) {
+        match parse_locale_archive(&mut f) {
+            Ok(v) => return v,
+            Err(e) => log::warn!("{LOCALE_ARCHIVE}: {e}"),
+        }
+    }
+    Vec::new()
 }
 
 /// A keyboard layout variant.
@@ -357,7 +379,7 @@ mod tests {
         let v = parse_supported(
             "de_DE.UTF-8 UTF-8\nde_DE ISO-8859-1\nC.UTF-8 UTF-8\nbad;x_Y.UTF-8 UTF-8\n",
         );
-        assert_eq!(v, ["de_DE.UTF-8"]);
+        assert_eq!(v, ["C.UTF-8", "de_DE.UTF-8"]);
         assert_eq!(norm_locale("fr_CA.utf8").as_deref(), Some("fr_CA.UTF-8"));
         assert_eq!(norm_locale("fr_CA.iso88591"), None);
         assert_eq!(
@@ -395,6 +417,16 @@ mod tests {
             ["en_US.UTF-8"]
         );
         assert!(parse_locale_archive(&mut Cursor::new(vec![0u8; 64])).is_err());
+    }
+
+    #[test]
+    fn locale_dirs_only_utf8() {
+        let d = tempfile::tempdir().unwrap();
+        for n in ["C.utf8", "en_US.utf8", "de_DE.iso88591"] {
+            std::fs::create_dir(d.path().join(n)).unwrap();
+        }
+        std::fs::write(d.path().join("locale-archive"), b"x").unwrap();
+        assert_eq!(parse_locale_dirs(d.path()), ["C.UTF-8", "en_US.UTF-8"]);
     }
 
     #[test]

@@ -290,3 +290,15 @@ baseline: wizard window within 1.5 s of the setup session starting on a cold
 boot; wizard RSS ≤ 140 MB; the whole setup session PSS ≤ 350 MB; idle CPU
 < 1 %; the helper ≤ 10 MB and gone when idle. Lists (locales, layouts, time
 zones) load on a worker on first view.
+
+## Demo mode and start-up probes
+
+- `ATLAS_WIZARD_DEMO=1` runs the GUI on canned data. In it, the user name
+  `fail` makes `CreateAccount` fail (any other name waits 3 s first), the
+  Wi-Fi password `wrong` fails, and `ATLAS_WIZARD_ANSWERS=<file>` names the
+  answers file (to jump to a page for screenshots). The variable is read only
+  in demo mode; otherwise the path is fixed at `/run/atlas-setup/answers.json`.
+- The reads at start-up (NetworkManager connectivity, hostnamed's static
+  name) time out after 5 s, not 25 s: a missing service must not hold the
+  first page. The page then shows as if the answer were "no".
+

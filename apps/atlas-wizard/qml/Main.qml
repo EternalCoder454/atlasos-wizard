@@ -16,13 +16,13 @@ AtlasWindow {
     property string waitingFor: ""
 
     title: AtlasApp.name
-    width: Kirigami.Units.gridUnit * 40
-    height: Kirigami.Units.gridUnit * 30
     // Full screen, no close: the stand-in for AtlasWindow.kiosk (Atlas.Ui 1.5.0).
+    x: 0
+    y: 0
+    width: Screen.width
+    height: Screen.height
     visibility: Window.FullScreen
     visible: true
-    // Larger text reaches what takes its font from the window.
-    font.pointSize: Kirigami.Theme.defaultFont.pointSize * (root.answers.textScale ?? 1)
     LayoutMirroring.enabled: Qt.locale().textDirection === Qt.RightToLeft
     LayoutMirroring.childrenInherit: true
 
@@ -71,6 +71,7 @@ AtlasWindow {
             root.accountDone = true;
             root.answers = Object.assign({}, root.answers, { userName: s.resumeAccount });
         }
+        root.backend.setTextScale(root.answers.textScale ?? 1);
         if (root.answers.screenReader) {
             root.backend.setOption("screenReader", true);
         }
@@ -239,6 +240,7 @@ AtlasWindow {
                     root.toggleScreenReader(on);
                 } else if (what === "largerText") {
                     root.setAnswer("textScale", on ? 1.25 : 1.0);
+                    root.backend.setTextScale(on ? 1.25 : 1.0);
                 } else {
                     root.setAnswer("highContrast", on);
                     root.backend.setOption("highContrast", on);

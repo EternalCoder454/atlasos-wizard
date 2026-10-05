@@ -17,6 +17,11 @@ use std::sync::{Arc, Mutex};
 use wizard_core::{password, validate};
 use zeroize::Zeroizing;
 
+unsafe extern "C" {
+    /// In `cpp/main.cpp`.
+    fn atlas_set_text_scale(scale: f64);
+}
+
 #[cxx_qt::bridge]
 pub mod qobject {
     unsafe extern "C++" {
@@ -108,6 +113,11 @@ pub mod qobject {
         #[cxx_name = "finishSetup"]
         fn finish_setup(self: Pin<&mut Backend>);
 
+        /// Sets the application font to the base font times `scale`.
+        #[qinvokable]
+        #[cxx_name = "setTextScale"]
+        fn set_text_scale(self: &Backend, scale: f64);
+
         /// The user name suggested for a full name (cheap, so synchronous).
         #[qinvokable]
         #[cxx_name = "deriveUserName"]
@@ -175,6 +185,16 @@ where
     args.into_iter().skip(1).any(|a| a.as_ref() == "--welcome")
 }
 
+/// The answers file: fixed outside demo mode; demo keeps none unless a test
+/// names one (the environment is never trusted otherwise).
+fn answers_path(demo: bool, env: Option<std::ffi::OsString>) -> Option<PathBuf> {
+    if demo {
+        env.map(PathBuf::from)
+    } else {
+        Some(PathBuf::from(answers::DEFAULT_PATH))
+    }
+}
+
 /// Where answers go and who may write them: later saves win.
 struct Persist {
     path: Option<PathBuf>,
@@ -202,11 +222,7 @@ impl Default for BackendRust {
     fn default() -> Self {
         let demo = demo_from(std::env::var_os("ATLAS_WIZARD_DEMO").as_deref());
         // Demo keeps no state unless a test names a file.
-        let path = if demo {
-            std::env::var_os("ATLAS_WIZARD_ANSWERS").map(PathBuf::from)
-        } else {
-            Some(PathBuf::from(answers::DEFAULT_PATH))
-        };
+        let path = answers_path(demo, std::env::var_os("ATLAS_WIZARD_ANSWERS"));
         let loaded = path.as_deref().map(Answers::load).unwrap_or_default();
         let sys: Arc<dyn System> = if demo {
             Arc::new(Demo)
@@ -474,6 +490,14 @@ impl qobject::Backend {
         );
     }
 
+    pub fn set_text_scale(&self, scale: f64) {
+        if [1.0, 1.25, 1.5].contains(&scale) {
+            // SAFETY: called on the GUI thread (a QML invokable), where Qt
+            // allows changing the application font.
+            unsafe { atlas_set_text_scale(scale) };
+        }
+    }
+
     pub fn derive_user_name(&self, full_name: &QString) -> QString {
         q(&validate::derive_user_name(&full_name.to_string()))
     }
@@ -521,6 +545,17 @@ mod tests {
         assert!(!demo_from(Some(OsStr::new("0"))));
         assert!(!demo_from(Some(OsStr::new(""))));
         assert!(!demo_from(None));
+    }
+
+    #[test]
+    fn answers_path_env_only_in_demo() {
+        let e = || Some(std::ffi::OsString::from("/tmp/x.json"));
+        assert_eq!(answers_path(true, e()), Some(PathBuf::from("/tmp/x.json")));
+        assert_eq!(answers_path(true, None), None);
+        assert_eq!(
+            answers_path(false, e()),
+            Some(PathBuf::from(answers::DEFAULT_PATH))
+        );
     }
 
     #[test]

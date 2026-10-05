@@ -9,6 +9,19 @@ extern "C" void *atlas_backend_new();
 // declared here as that header's comment allows.
 extern "C" int atlas_app_run(int argc, char *argv[], const char *qmlModule, const char *qmlType, void *(*makeBackend)());
 
+#include <QGuiApplication>
+#include <QFont>
+
+// Sets the application font to its first-seen size times `scale`. Kirigami's
+// and Atlas.Ui's sizes come from the application font, so they follow.
+extern "C" void atlas_set_text_scale(double scale)
+{
+    static const qreal base = QGuiApplication::font().pointSizeF();
+    QFont f = QGuiApplication::font();
+    f.setPointSizeF(base * scale);
+    QGuiApplication::setFont(f);
+}
+
 int main(int argc, char *argv[])
 {
     return atlas_app_run(argc, argv, "net.eterneon.atlas.wizard", "Main", atlas_backend_new);
