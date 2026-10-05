@@ -63,8 +63,9 @@ Requires:       cracklib-dicts
 # the helper and boot program talk to systemd, logind and the system bus
 Requires:       systemd
 Requires:       dbus-common
-# atlas-wizard-boot prepare/fallback run chage and usermod, and the fallback
-# unit runs chvt
+# useradd, chage, usermod and chpasswd are shadow-utils (above); the setup
+# user's shell /usr/sbin/nologin and the session script's logger are
+# util-linux; the fallback unit runs chvt (kbd)
 Requires:       util-linux
 Requires:       kbd
 # The atlas-setup user comes from sysusers.d/atlas-wizard.conf: rpm creates it
@@ -204,9 +205,9 @@ done
 %{_tmpfilesdir}/atlas-wizard.conf
 %{_datadir}/wayland-sessions/atlas-wizard.desktop
 %dir %{_sharedstatedir}/atlas-wizard
-# The done marker, written by the helper; /etc/atlasos is made by tmpfiles.d
-# (no package owns it).
-%ghost %attr(0644,root,root) %{_sysconfdir}/atlasos/setup-done
+# Not owned, not even as %%ghost: the done marker /etc/atlasos/setup-done is the
+# machine's, and rpm deletes a package's ghost files when it is removed.
+# /etc/atlasos is made by tmpfiles.d.
 
 %changelog
 * Fri Oct 02 2026 Atlas <atlas@eterneon.net> - 0.1.0-1
