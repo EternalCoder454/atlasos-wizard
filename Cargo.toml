@@ -1,0 +1,27 @@
+[workspace]
+resolver = "3"
+members = ["crates/wizard-core", "apps/atlas-wizard"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/EternalCoder454/atlasos-wizard"
+rust-version = "1.89"
+
+[workspace.dependencies]
+# The atlas-framework crates (startup, settings, logging, crash reports,
+# polkit); to move the pin, see CLAUDE.md. Atlas.Ui is not pinned here: it is
+# the installed atlas-ui package.
+atlas-framework-ui = { git = "https://github.com/EternalCoder454/atlas-framework", tag = "v1.4.0" }
+atlas-framework-system = { git = "https://github.com/EternalCoder454/atlas-framework", tag = "v1.4.0" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3"
+wizard-core = { path = "crates/wizard-core" }
+zeroize = "1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 4
+strip = true
