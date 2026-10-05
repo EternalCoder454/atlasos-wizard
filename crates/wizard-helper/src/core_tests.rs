@@ -1006,6 +1006,21 @@ async fn end_setup_finishes_the_tail_when_the_markers_exist_but_finish_is_marker
 }
 
 #[tokio::test]
+async fn end_setup_markers_tail_needs_a_verified_account() {
+    let r = rig();
+    finished(&r).await;
+    let mut st = r.state();
+    st.finish = Some(FINISH_MARKERS.into());
+    st.account = None;
+    st.save(&r.core.paths().state()).unwrap();
+    let before = r.runner.log.lock().unwrap().len();
+    assert_eq!(code(r.core.end_setup().await).1, "not-finished");
+    assert_eq!(r.runner.log.lock().unwrap().len(), before, "nothing locked");
+    assert_eq!(r.state().finish.as_deref(), Some(FINISH_MARKERS));
+    assert!(r.systemd.log.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn create_account_is_refused_after_giving_up() {
     let r = rig();
     r.core.give_up().await.unwrap();

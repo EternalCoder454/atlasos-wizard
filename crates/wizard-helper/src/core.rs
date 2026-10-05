@@ -550,7 +550,21 @@ impl Core {
         let mut st = self.load_state()?;
         if self.setup_done() && st.finish.as_deref() == Some(FINISH_MARKERS) {
             // The markers are there but the tail of Finish never ran (a cut,
-            // or GiveUp's session retry): run it now, as Finish would.
+            // or GiveUp's session retry): run it now, as Finish would, but
+            // only for a real account; else `prepare` cleans up at next boot.
+            let verified = match &st.account {
+                Some(a) if a.stage == Stage::Verified => {
+                    accounts::verify(self.paths.root(), &a.name, a.uid).is_ok()
+                }
+                _ => false,
+            };
+            if !verified {
+                log::warn!("EndSetup: the markers exist but there is no verified account");
+                return Err(HelperError::failed(
+                    "not-finished",
+                    "Setup has not been finished yet.",
+                ));
+            }
             log::info!("EndSetup: finishing the clean-up after the markers");
             self.remove_setup_autologin();
             self.lock_setup_user().await;

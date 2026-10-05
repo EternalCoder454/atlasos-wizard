@@ -124,9 +124,10 @@ pub fn decide(input: &BootInput) -> BootAction {
         return BootAction::MarkDoneAndCleanup;
     }
     let verified = verified_and_present(input);
-    // 5. (first) verified and boots >= 3, or forced to the fallback: the
-    // account exists, so the machine is finished with defaults.
-    if verified && (s.boots >= MAX_BOOTS || input.cmdline == Cmdline::Fallback) {
+    // 5. (first) verified and boots >= 3, gave up, or forced to the fallback:
+    // the account exists, so the machine is finished with defaults (after
+    // GiveUp the helper refuses Finish, so resuming the wizard would strand it).
+    if verified && (s.boots >= MAX_BOOTS || s.gave_up || input.cmdline == Cmdline::Fallback) {
         return BootAction::FinishWithDefaults;
     }
     // 4. verified, Finish not done, boots < 3
@@ -306,6 +307,15 @@ mod tests {
         let mut i = input(1, acct(Stage::Verified), vec![human("ada", 1000)]);
         i.state.finish = Some("markers".into());
         assert_eq!(decide(&i), BootAction::FinishWithDefaults);
+    }
+
+    #[test]
+    fn verified_after_give_up_finishes_with_defaults() {
+        for boots in [0, 1, 2, 3] {
+            let mut i = input(boots, acct(Stage::Verified), vec![human("ada", 1000)]);
+            i.state.gave_up = true;
+            assert_eq!(decide(&i), BootAction::FinishWithDefaults, "boots {boots}");
+        }
     }
 
     // Row 6

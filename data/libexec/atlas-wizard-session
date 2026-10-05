@@ -33,10 +33,10 @@ if [ "$failures" -ge 3 ]; then
     case $tries in
     '' | *[!0-9]*) tries=0 ;;
     esac
-    if [ "$tries" -ge 5 ]; then
+    if [ "$tries" -ge 10 ]; then
         # Stop plasmalogin respawning this session; a reboot takes the boot
         # fallback.
-        logger -t atlas-wizard-session "GiveUp failed 5 times; waiting for a reboot (text-mode fallback)" 2>/dev/null
+        logger -t atlas-wizard-session "GiveUp failed 10 times; waiting for a reboot (text-mode fallback)" 2>/dev/null
         sleep infinity
     fi
     write_count_to "$tries_file" $((tries + 1))
@@ -60,8 +60,13 @@ if [ "$failures" -ge 3 ]; then
         ;;
     esac
     logger -t atlas-wizard-session "GiveUp failed (busctl exit $rc): $err" 2>/dev/null
-    # Wait before failing, so a restart loop cannot spin.
-    sleep 5
+    # Wait before failing, so a restart loop cannot spin: 5 s after the first
+    # failure, 15 s after the second, then 30 s (about 5 minutes in all).
+    case $tries in
+    0) sleep 5 ;;
+    1) sleep 15 ;;
+    *) sleep 30 ;;
+    esac
     exit 1
 fi
 
