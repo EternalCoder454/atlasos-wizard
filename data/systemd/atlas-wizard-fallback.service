@@ -1,0 +1,48 @@
+[Unit]
+Description=AtlasOS Setup in text mode
+Documentation=https://github.com/EternalCoder454/atlasos-wizard/blob/main/docs/DESIGN.md
+# The login screen and a getty would fight it for the console.
+Conflicts=display-manager.service getty@tty1.service
+After=atlas-wizard-boot.service systemd-user-sessions.service plymouth-quit-wait.service getty@tty1.service
+# A broken fallback must not spin: five starts in two minutes and it stays
+# stopped (the other virtual terminals still have a login).
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStartPre=-/usr/bin/chvt 1
+ExecStart=/usr/libexec/atlas-wizard-boot fallback
+StandardInput=tty
+StandardOutput=tty
+# Logs go to the journal (-t atlas-wizard-boot), never onto the console.
+StandardError=journal
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+Restart=on-failure
+RestartSec=2
+UMask=0022
+
+# useradd -m writes /etc, /home (/var/home on an image-based system), the mail
+# spool and the lastlog; the state is in /var/lib. Not /usr, /boot or the
+# kernel's knobs.
+ProtectSystem=strict
+ReadWritePaths=/etc /var -/home -/run/atlas-setup
+PrivateTmp=yes
+PrivateNetwork=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+SystemCallArchitectures=native
+
+# No [Install]: started by `prepare` (no way to the graphical setup) or by the
+# helper's GiveUp, never at boot on its own.

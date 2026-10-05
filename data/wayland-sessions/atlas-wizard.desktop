@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=AtlasOS Setup
+Comment=First-run setup of AtlasOS
+Exec=/usr/libexec/atlas-wizard-session
+# Not in the session list; the setup autologin names it. (Not `Hidden=true`:
+# that disables the entry for autologin too.)
+NoDisplay=true
+DesktopNames=KDE

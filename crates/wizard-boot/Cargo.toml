@@ -1,0 +1,41 @@
+[package]
+name = "wizard-boot"
+description = "AtlasOS Wizard boot program: prepare (every boot, before the display manager) and the text-mode fallback"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "wizard_boot"
+
+[[bin]]
+name = "atlas-wizard-boot"
+path = "src/main.rs"
+
+# Tests only: `Paths` takes its root from ATLAS_WIZARD_TEST_ROOT and every
+# external command goes to a fake that edits files under that root. Never in a
+# release build: the self dev-dependency below turns it on for `cargo test`
+# only.
+[features]
+test-root = []
+
+[dependencies]
+atlas-framework-core.workspace = true
+libc.workspace = true
+log.workspace = true
+rustix = { workspace = true, features = ["termios", "stdio", "event"] }
+wizard-core.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+rustix = { workspace = true, features = ["termios", "stdio", "pty", "fs", "event", "process"] }
+serde_json.workspace = true
+tempfile.workspace = true
+# Turns on `test-root` for this package's own tests and the binary they run.
+wizard-boot = { path = ".", features = ["test-root"] }
+
+[[test]]
+name = "boot"
+path = "../../tests/boot/main.rs"
