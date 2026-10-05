@@ -1,0 +1,5 @@
+[D-BUS Service]
+Name=net.eterneon.atlas.WizardHelper
+Exec=/bin/false
+User=root
+SystemdService=atlas-wizard-helper.service

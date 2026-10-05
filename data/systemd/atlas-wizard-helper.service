@@ -1,0 +1,53 @@
+[Unit]
+Description=AtlasOS Wizard helper (creates the first account and finishes setup)
+Documentation=https://github.com/EternalCoder454/atlasos-wizard
+
+[Service]
+Type=dbus
+BusName=net.eterneon.atlas.WizardHelper
+ExecStart=/usr/libexec/atlas-wizard-helper
+# The helper exits by itself after 30 seconds without a call.
+#
+# Sandboxed with the safe subset only. Each option left out is left out on
+# purpose, and every choice here is to be confirmed in the AtlasOS VM test:
+#   ProtectSystem, ProtectHome, ReadWritePaths, PrivateMounts: the helper writes
+#     /etc (the done markers, the autologin drop-in), /var/lib/atlas-wizard (the
+#     state) and the new account's home (through the settings child; /home is a
+#     link to /var/home on AtlasOS), and chage and usermod write /etc/shadow and
+#     /etc/passwd with lock files beside them. A strict mount sandbox would need
+#     every one of those paths proven in a VM first; all of them are fixed
+#     paths, none comes from a caller.
+#   NoNewPrivileges, RestrictSUIDSGID: chage and usermod run in their own
+#     SELinux domains, and NoNewPrivileges blocks the transition. The helper is
+#     root and gains nothing from setuid files anyway.
+#   User=, DynamicUser=: it must be root: it writes /etc and switches to the
+#     new account's uid for the settings child (it needs CAP_SETUID and
+#     CAP_SETGID, and CAP_CHOWN, CAP_DAC_OVERRIDE and CAP_FOWNER for /etc).
+#   MemoryDenyWriteExecute, RestrictNamespaces, PrivateDevices: the settings
+#     child starts Qt programs (plasma-apply-lookandfeel and
+#     plasma-apply-colorscheme), and all three are inherited by them; Qt may
+#     need a writable and executable mapping or probe /dev/dri.
+#   PrivateNetwork: RestrictAddressFamilies=AF_UNIX below already leaves only
+#     the system bus and the journal.
+#   Creating the user: useradd runs inside AccountsService, in its own process
+#     and its own sandbox, never in this helper.
+PrivateTmp=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+LockPersonality=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX
+CapabilityBoundingSet=~CAP_SYS_MODULE CAP_SYS_TIME CAP_SYS_BOOT CAP_SYS_RAWIO CAP_SYS_TTY_CONFIG CAP_WAKE_ALARM CAP_BLOCK_SUSPEND CAP_SYSLOG CAP_AUDIT_CONTROL CAP_AUDIT_READ CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE CAP_NET_BROADCAST CAP_SYS_PACCT CAP_LEASE CAP_MAC_OVERRIDE CAP_CHECKPOINT_RESTORE CAP_BPF CAP_PERFMON CAP_SYS_PTRACE CAP_SYS_ADMIN CAP_MKNOD
+UMask=0022
+# Stopping: the helper handles SIGTERM itself (refuses new calls, releases its
+# bus name, lets a running call finish). Every step it takes is recorded in
+# /var/lib/atlas-wizard/state.json first, so a kill at any point is resolved by
+# the next CreateAccount or Finish. KillMode=mixed sends SIGTERM to the helper
+# only and SIGKILL to leftovers when TimeoutStopSec runs out.
+KillMode=mixed
+TimeoutStopSec=30

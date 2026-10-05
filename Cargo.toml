@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/wizard-core", "apps/atlas-wizard"]
+members = ["crates/wizard-core", "crates/wizard-helper", "apps/atlas-wizard"]
 
 [workspace.package]
 version = "0.1.0"
@@ -15,10 +15,17 @@ rust-version = "1.89"
 # the installed atlas-ui package.
 atlas-framework-ui = { git = "https://github.com/EternalCoder454/atlas-framework", tag = "v1.4.0" }
 atlas-framework-system = { git = "https://github.com/EternalCoder454/atlas-framework", tag = "v1.4.0" }
+atlas-framework-core = { git = "https://github.com/EternalCoder454/atlas-framework", tag = "v1.4.0" }
+libc = "0.2"
+log = "0.4"
+# safe killpg for the helper's children
+rustix = { version = "1", default-features = false, features = ["std", "process"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "signal", "process", "io-util"] }
 wizard-core = { path = "crates/wizard-core" }
+zbus = { version = "5", default-features = false, features = ["tokio"] }
 zeroize = "1"
 
 [profile.release]
