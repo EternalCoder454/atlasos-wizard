@@ -28,8 +28,8 @@ fi
 
 tty=()
 [ -t 0 ] && tty=(-it)
-exec podman run --rm "${tty[@]}" \
-    -v "$repo":/src:z -w /src \
+exec podman run --rm --security-opt label=disable "${tty[@]}" \
+    -v "$repo":/src -w /src \
     -v atlas-cargo:/root/.cargo/registry \
     -v atlas-cargo-git:/root/.cargo/git \
     -e CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-/src/target/dev}" \
