@@ -1,7 +1,11 @@
 //! AtlasOS Setup, Rust side. `cpp/main.cpp` only hands over to the framework;
 //! every QObject QML talks to is defined here.
 
+mod answers;
 mod backend;
+mod data;
+mod errors;
+mod system;
 
 use std::ffi::c_void;
 

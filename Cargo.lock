@@ -96,7 +96,13 @@ dependencies = [
  "cxx-qt-build",
  "cxx-qt-lib",
  "log",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
  "wizard-core",
+ "zbus",
+ "zeroize",
 ]
 
 [[package]]

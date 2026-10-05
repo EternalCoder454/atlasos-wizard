@@ -3,36 +3,51 @@ import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 import Atlas.Ui
 
-// Placeholder: the first page. The real pages come with the wizard's flow.
-Item {
+WizardPage {
     id: page
 
-    required property var backend
+    property bool screenReader: false
+    property bool largerText: false
+    property bool highContrast: false
+    property bool highContrastAvailable: false
+    signal optionToggled(string what, bool on)
 
-    signal startRequested
+    stepId: "welcome"
+    title: qsTr("Welcome to AtlasOS")
+    subtitle: qsTr("Let's set up your computer. This takes a few minutes.")
 
-    ColumnLayout {
-        anchors.centerIn: parent
-        spacing: Kirigami.Units.largeSpacing
-
-        Kirigami.Icon {
-            Layout.alignment: Qt.AlignHCenter
-            Layout.preferredWidth: Kirigami.Units.iconSizes.enormous
-            Layout.preferredHeight: Kirigami.Units.iconSizes.enormous
-            source: "atlasos"
-            fallback: "distributor-logo"
+    Kirigami.Icon {
+        Layout.alignment: Qt.AlignHCenter
+        Layout.preferredWidth: Kirigami.Units.iconSizes.enormous
+        Layout.preferredHeight: Kirigami.Units.iconSizes.enormous
+        source: "atlasos"
+        fallback: "distributor-logo"
+    }
+    Section {
+        Layout.fillWidth: true
+        title: qsTr("Accessibility")
+        SectionRow {
+            title: qsTr("Screen Reader")
+            subtitle: qsTr("Read the screen aloud. Meta+Alt+S turns it on from anywhere.")
+            showSwitch: true
+            switchChecked: page.screenReader
+            onSwitchToggled: checked => page.optionToggled("screenReader", checked)
         }
-
-        AtlasLabel {
-            Layout.alignment: Qt.AlignHCenter
-            textStyle: AtlasLabel.Title
-            text: qsTr("Welcome to AtlasOS")
+        SectionRow {
+            title: qsTr("Larger Text")
+            showSwitch: true
+            switchChecked: page.largerText
+            onSwitchToggled: checked => page.optionToggled("largerText", checked)
         }
-
-        PrimaryButton {
-            Layout.alignment: Qt.AlignHCenter
-            text: qsTr("Get Started")
-            onClicked: page.startRequested()
+        SectionRow {
+            visible: page.highContrastAvailable
+            title: qsTr("High Contrast")
+            showSwitch: true
+            switchChecked: page.highContrast
+            onSwitchToggled: checked => page.optionToggled("highContrast", checked)
         }
+    }
+    Item {
+        Layout.fillHeight: true
     }
 }

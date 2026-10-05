@@ -43,13 +43,32 @@ qt_add_qml_module(atlas-wizard-app
     VERSION 1.0
     QML_FILES
         qml/Main.qml
+        qml/ErrorText.qml
+        qml/WizardPage.qml
+        qml/WizardOnboarding.qml
+        qml/WizardPasswordStrength.qml
+        qml/WizardChoiceCard.qml
+        qml/WizardAccentPicker.qml
+        qml/WizardPicker.qml
         qml/WelcomePage.qml
+        qml/LanguagePage.qml
+        qml/KeyboardPage.qml
+        qml/WifiPage.qml
+        qml/TimeZonePage.qml
+        qml/AccountPage.qml
+        qml/HostnamePage.qml
+        qml/AppearancePage.qml
+        qml/PrivacyPage.qml
+        qml/FinishPage.qml
+        qml/FirstLoginPage.qml
 )
 
 target_link_libraries(atlas-wizard-app PRIVATE
     atlas_wizard
     Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::Widgets
-    KF6::CoreAddons KF6::DBusAddons KF6::WindowSystem)
+    KF6::CoreAddons KF6::DBusAddons KF6::WindowSystem
+    # wizard-core calls libxcrypt and libpwquality; a static Rust library carries no link flags.
+    crypt pwquality)
 
 install(TARGETS atlas-wizard-app RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES data/net.eterneon.atlas.wizard.desktop
