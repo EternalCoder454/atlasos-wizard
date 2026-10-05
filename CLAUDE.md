@@ -58,11 +58,16 @@ Updater's (`~/Documents/Projects/AtlasOS/Atlas Updater`,
 | Atlas checks | `~/Documents/Atlas\ Framework/tools/lint-app.sh . && ~/Documents/Atlas\ Framework/tools/check-app-names.sh .` (host, read-only scripts) |
 | RPM | `scripts/dev.sh packaging/build-rpm.sh /src/out` |
 
-`scripts/dev.sh` builds `localhost/atlas-wizard-dev:44` on first use from
-`ATLAS_LOCAL_RPMS=<dir>`: atlas-framework v1.4.0's RPMs (atlas-ui and
-atlas-symbols-fonts), built from the tag with the framework's
-`packaging/build-rpm.sh`. Delete the image after changing the spec's
-BuildRequires or to take a newer atlas-ui.
+`scripts/dev.sh` builds `localhost/atlas-wizard-dev:44` from `ci/Containerfile`
+(the one list of packages; CI runs in the same file's `ci` target, published
+as `ghcr.io/eternalcoder454/atlas-wizard-dev` by `dev-image.yml`). It builds
+atlas-ui and atlas-symbols-fonts from the atlas-framework tag in `Cargo.toml`
+(needs network), and rebuilds by itself when the Containerfile, the spec's
+BuildRequires or that tag change (`ci/image-tag.sh`).
+`ATLAS_FRAMEWORK_REF=<tag or branch>` builds against another framework ref.
+`ATLAS_LOCAL_RPMS` is gone. CI (`.github/workflows/ci.yml`) runs the Format,
+Lint, Tests and RPM rows above plus qmllint, shellcheck and
+`desktop-file-validate`, with mold as the linker (`RUSTFLAGS` there only).
 
 `ATLAS_WIZARD_DEMO=1` runs the GUI with no helper and no system services
 (every call answers from canned data), for screenshots and layout work.
@@ -70,6 +75,7 @@ BuildRequires or to take a newer atlas-ui.
 ## Moving the atlas-framework pin
 
 Change `tag` in `Cargo.toml`, then `scripts/dev.sh cargo update -p atlas-framework-ui -p atlas-framework-system`.
-Move the same tag in `.github/workflows/ci.yml` and, when the app uses
+CI and the dev image follow the tag by themselves (`ci/framework-ref.sh`).
+When the app uses
 something new in Atlas.Ui, `ui:` in `apps/atlas-wizard/src/lib.rs` and
 `atlas-ui >=` in the spec (Requires and BuildRequires) together.

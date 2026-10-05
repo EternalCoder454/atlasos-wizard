@@ -1,40 +1,29 @@
 #!/bin/bash
-# Run a command in the fedora:44 build container, with the repo at /src and
-# the cargo and dnf caches in named podman volumes (the dnf one is this app's own).
+# Run a command in the dev container (the image CI uses, plus tools for
+# headless GUI runs), with the repo at /src and the cargo cache in named
+# podman volumes.
 #   scripts/dev.sh <command...>     e.g. scripts/dev.sh cargo test --workspace
 #   scripts/dev.sh                  an interactive shell
-# The first run installs the build dependencies from the spec (cached after).
-# They include atlas-ui, which no repository has: that run needs
-# ATLAS_LOCAL_RPMS=<dir> holding atlas-framework's RPMs (atlas-ui and
-# atlas-symbols-fonts): the out dir of its packaging/build-rpm.sh, one version
-# only. An image made before atlas-ui was needed lacks it: delete the image.
+# The image is built from ci/Containerfile on first use, and again whenever the
+# Containerfile, the spec's BuildRequires or the atlas-framework tag in
+# Cargo.toml change (ci/image-tag.sh). It needs network access: it builds
+# atlas-ui from atlas-framework's tag. ATLAS_FRAMEWORK_REF=<tag or branch>
+# builds from another ref (the image is rebuilt when it changes).
 # Set CARGO_TARGET_DIR to /src/target/<name> to keep one target dir per task.
 set -euo pipefail
 
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 image=localhost/atlas-wizard-dev:44
+pinned=$("$repo/ci/framework-ref.sh")
+ref=${ATLAS_FRAMEWORK_REF:-$pinned}
+want=$("$repo/ci/image-tag.sh")
+[ "$ref" = "$pinned" ] || want=$want-$ref
 
-if ! podman image exists "$image"; then
-    rpms=${ATLAS_LOCAL_RPMS:?the dev image needs atlas-framework RPMs: set ATLAS_LOCAL_RPMS=<dir>}
-    rpms=$(cd "$rpms" && pwd)
-    ctr=$(podman run -d --security-opt label=disable -v "$repo/packaging":/packaging:ro \
-        -v "$rpms":/atlas-rpms:ro \
-        -v atlas-wizard-dnf:/var/cache/libdnf5 \
-        registry.fedoraproject.org/fedora:44 sleep infinity)
-    trap 'podman rm -f "$ctr" >/dev/null' EXIT
-    podman exec "$ctr" bash -c '
-        echo keepcache=True >>/etc/dnf/dnf.conf
-        dnf -y install dnf5-plugins rpm-build clippy rustfmt xorg-x11-server-Xvfb \
-            dbus-daemon qt6-qtbase-gui kf6-qqc2-desktop-style breeze-icon-theme \
-            ImageMagick xdotool \
-            accountsservice python3-dbusmock polkit shadow-utils passwd util-linux systemd \
-            kwin plasma-workspace libxcrypt-devel libpwquality-devel cracklib-dicts orca \
-            at-spi2-core \
-            /atlas-rpms/atlas-ui-[0-9]*.rpm /atlas-rpms/atlas-symbols-fonts-[0-9]*.rpm &&
-        dnf -y builddep /packaging/atlas-wizard.spec' >&2
-    podman commit "$ctr" "$image" >/dev/null
-    podman rm -f "$ctr" >/dev/null
-    trap - EXIT
+have=$(podman image inspect --format '{{ index .Labels "net.eterneon.atlas.wizard.image-tag" }}' "$image" 2>/dev/null || true)
+if [ "$have" != "$want" ]; then
+    podman build -f "$repo/ci/Containerfile" --target dev \
+        --build-arg ATLAS_FRAMEWORK_REF="$ref" --build-arg IMAGE_TAG="$want" \
+        -t "$image" "$repo" >&2
 fi
 
 tty=()
