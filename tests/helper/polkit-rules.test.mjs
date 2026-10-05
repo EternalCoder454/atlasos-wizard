@@ -32,16 +32,18 @@ function load({ markers = [], spawnBroken = false, noParent = [] } = {}) {
       calls.push(argv);
       if (spawnBroken) throw new Error("cannot run");
       // (arrays from the rule's realm: compare as JSON)
-      const shape = [argv[0], argv[1], argv[3], argv[4], argv[5]];
+      const shape = [argv[0], argv[1], argv[3], argv[4], argv[6], argv[7], argv[8]];
       if (
-        argv.length !== 7 ||
-        JSON.stringify(shape) !== '["/usr/bin/test","-d","-a","!","-e"]'
+        argv.length !== 10 ||
+        argv[5] !== argv[2] ||
+        JSON.stringify(shape) !== '["/usr/bin/test","-d","-a","-x","-a","!","-e"]'
       ) {
         throw new Error("unexpected program: " + JSON.stringify(argv));
       }
-      // `test -d parent -a ! -e marker`: fails when the parent is missing
+      // `test -d parent -a -x parent -a ! -e marker`: fails when the parent
+      // is missing or cannot be searched
       if (noParent.includes(argv[2])) throw new Error("exit status 1");
-      if (markers.includes(argv[6])) throw new Error("exit status 1");
+      if (markers.includes(argv[9])) throw new Error("exit status 1");
       return "";
     },
   };
@@ -106,10 +108,10 @@ test("each marker is tested with its own parent directory", () => {
   const { rule, calls } = load();
   rule({ id: granted[0] }, setup);
   assert.deepEqual(
-    calls.map((c) => [c[2], c[6]]),
+    calls.map((c) => [c[2], c[5], c[9]]),
     [
-      ["/etc/atlasos", "/etc/atlasos/setup-done"],
-      ["/etc", "/etc/plasma-setup-done"],
+      ["/etc/atlasos", "/etc/atlasos", "/etc/atlasos/setup-done"],
+      ["/etc", "/etc", "/etc/plasma-setup-done"],
     ],
   );
 });

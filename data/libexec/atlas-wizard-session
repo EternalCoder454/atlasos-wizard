@@ -28,7 +28,8 @@ if [ "$failures" -ge 3 ]; then
         exit 0
     fi
     case $err in
-    *SetupDone*)
+    # busctl prints the error's message, "setup-done: ...", not its name
+    *setup-done:*)
         # Setup finished meanwhile: EndSetup reruns the clean-up and restarts
         # the display manager.
         if busctl --system call net.eterneon.atlas.WizardHelper \

@@ -37,7 +37,7 @@ docs/                           this file, the image hand-over
 |---|---|---|
 | `/usr/libexec/atlas-wizard-boot prepare` | root, `atlas-wizard-boot.service`, every boot before the display manager | Reads the state and the system, decides (table below), writes or removes the setup autologin, cleans up and locks `atlas-setup` once setup is done. Fast: a few stats when done. |
 | `/usr/libexec/atlas-wizard-boot fallback` | root, `atlas-wizard-fallback.service` on tty1 | Text-mode account creation, when the GUI cannot run. |
-| `/usr/libexec/atlas-wizard-session` | `atlas-setup`, the plasmalogin autologin session `atlas-wizard` | Starts `kwin_wayland` with only the wizard, the screen reader's bus, the on-screen keyboard. Counts failed starts this boot in `/run/atlas-setup/session-failures`; at 3 it calls the helper's `GiveUp`. If that fails: on `SetupDone` it calls `EndSetup` (clean-up again, display manager restart); on any other failure it logs with `logger -t atlas-wizard-session`, sleeps 5 s and exits non-zero, so a restart loop cannot spin. |
+| `/usr/libexec/atlas-wizard-session` | `atlas-setup`, the plasmalogin autologin session `atlas-wizard` | Starts `kwin_wayland` with only the wizard, the screen reader's bus, the on-screen keyboard. Counts failed starts this boot in `/run/atlas-setup/session-failures`; at 3 it calls the helper's `GiveUp`. If that fails: on `SetupDone` (busctl prints the message, `setup-done: ...`) it calls `EndSetup` (clean-up again, display manager restart); on any other failure it logs with `logger -t atlas-wizard-session`, sleeps 5 s and exits non-zero, so a restart loop cannot spin. |
 | `/usr/bin/atlas-wizard` | `atlas-setup` | The setup pages. |
 | `/usr/bin/atlas-wizard --welcome` | the signed-in user, XDG autostart | First-login extras: fingerprint, PIN. |
 | `/usr/libexec/atlas-wizard-helper` | root, D-Bus activated (`atlas-wizard-helper.service`, `Type=dbus`), exits after 30 s idle | The only privileged code the GUI reaches. |
@@ -146,9 +146,9 @@ actions above, every default `no`. `/usr/share/polkit-1/rules.d/50-atlas-wizard.
 returns YES only when `subject.user == "atlas-setup" && subject.local &&
 subject.active` and neither `/etc/atlasos/setup-done` nor
 `/etc/plasma-setup-done` exists (checked with
-`polkit.spawn(["/usr/bin/test", "-d", parent, "-a", "!", "-e", path])` with
+`polkit.spawn(["/usr/bin/test", "-d", parent, "-a", "-x", parent, "-a", "!", "-e", path])` with
 parent `/etc/atlasos` or `/etc`, which tmpfiles.d creates; a marker, a missing
-or unreadable parent (a failed stat), or a spawn that fails, gives NO). The
+or unsearchable parent (checked with access(2), so SELinux counts), or a spawn that fails, gives NO). The
 helper likewise counts a marker it cannot stat as done, for our three actions and these stock ones. The exception is
 `net.eterneon.atlas.wizard.finish`: `Finish` writes the markers first and
 `EndSetup` uses the same action after them, so it is not subject to the marker
