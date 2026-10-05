@@ -8,6 +8,11 @@
 
 #![deny(unsafe_code)]
 
+// The test-root feature takes every path from the environment; a release
+// build (the RPM's) must never carry it.
+#[cfg(all(feature = "test-root", not(debug_assertions)))]
+compile_error!("the test-root feature is for test builds only, never a release build");
+
 pub mod cmd;
 pub mod console;
 #[cfg(any(test, feature = "test-root"))]

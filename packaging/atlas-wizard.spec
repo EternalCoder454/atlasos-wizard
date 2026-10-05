@@ -58,14 +58,14 @@ Requires:       kwin
 Requires:       plasma-login-manager
 Requires:       polkit
 Requires:       shadow-utils
-Requires:       libpwquality
 Requires:       cracklib-dicts
 # the helper and boot program talk to systemd, logind and the system bus
 Requires:       systemd
 Requires:       dbus-common
-# useradd, chage, usermod and chpasswd are shadow-utils (above); the setup
-# user's shell /usr/sbin/nologin and the session script's logger are
-# util-linux; the fallback unit runs chvt (kbd)
+# useradd, chage, usermod and chpasswd are shadow-utils (above); nologin
+# (the shell the lock step gives the setup user, which starts with /bin/sh
+# for its session) and the session script's logger are util-linux; the
+# fallback unit runs chvt (kbd)
 Requires:       util-linux
 Requires:       kbd
 # The atlas-setup user comes from sysusers.d/atlas-wizard.conf: rpm creates it

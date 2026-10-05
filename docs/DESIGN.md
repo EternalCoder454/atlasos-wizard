@@ -49,6 +49,12 @@ docs/                           this file, the image hand-over
    `After=systemd-sysusers.service systemd-tmpfiles-setup.service systemd-user-sessions.service`,
    `ConditionKernelCommandLine=!rd.live.image`, `WantedBy=multi-user.target`.
    It runs at every boot (not only the first), so cleanup is re-checked.
+   Its sandbox and the fallback unit's leave out `NoNewPrivileges` on
+   purpose, as the helper's does: chage, usermod, useradd and chpasswd run in
+   their own SELinux domains, and it blocks the transition. Both allow only
+   `AF_UNIX` sockets and no writable and executable memory. The AtlasOS VM
+   test confirms these under SELinux enforcing, and sets a
+   `CapabilityBoundingSet` from what that run needs.
 2. When setup is needed it writes `/etc/plasmalogin.conf.d/99-atlas-wizard.conf`:
 
    ```ini

@@ -13,6 +13,11 @@
 #![deny(unsafe_code)]
 #![warn(missing_docs)]
 
+// The test-root feature takes every path from the environment; a release
+// build (the RPM's) must never carry it.
+#[cfg(all(feature = "test-root", not(debug_assertions)))]
+compile_error!("the test-root feature is for test builds only, never a release build");
+
 pub mod apply;
 pub mod backends;
 pub mod core;

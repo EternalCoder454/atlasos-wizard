@@ -32,17 +32,29 @@ ProtectSystem=strict
 ReadWritePaths=/etc /var -/home -/run/atlas-setup
 PrivateTmp=yes
 PrivateNetwork=yes
-NoNewPrivileges=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectKernelLogs=yes
 ProtectControlGroups=yes
 ProtectClock=yes
+ProtectHostname=yes
 LockPersonality=yes
 RestrictRealtime=yes
 RestrictSUIDSGID=yes
 RestrictNamespaces=yes
+# No writable and executable memory: the program and the shadow-utils tools
+# it runs are plain C and Rust, no JIT.
+MemoryDenyWriteExecute=yes
 SystemCallArchitectures=native
+# The journal, the system bus and systemd's sockets; shadow-utils' audit
+# record needs AF_NETLINK and they go on without it.
+RestrictAddressFamilies=AF_UNIX
+# Left out on purpose: NoNewPrivileges. useradd, chage and chpasswd run in their own
+# SELinux domains, and it blocks the transition (as in
+# atlas-wizard-helper.service). To verify in the AtlasOS VM with SELinux
+# enforcing (`ausearch -m avc`, the journal for EPERM; MemoryDenyWriteExecute
+# and the address families too), then add a CapabilityBoundingSet of what the
+# run shows it needs.
 
 # No [Install]: started by `prepare` (no way to the graphical setup) or by the
 # helper's GiveUp, never at boot on its own.

@@ -25,5 +25,7 @@ scripts/dev.sh packaging/build-rpm.sh /src/out
 ```
 
 `ATLAS_WIZARD_DEMO=1` runs the GUI with no helper and no system services.
+The RPM is built from the commit at HEAD; `ATLAS_RPM_WORKTREE=1` builds the
+working tree instead, uncommitted edits included, for local testing.
 
 MIT licensed.
