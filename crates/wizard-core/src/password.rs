@@ -8,8 +8,9 @@
 // The FFI to two C libraries lives here and nowhere else.
 #![allow(unsafe_code)]
 
-use std::ffi::{c_char, c_int, c_ulong, c_void};
+use std::ffi::{CStr, c_char, c_int, c_ulong, c_void};
 use std::ptr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use zeroize::{Zeroize, Zeroizing};
 
 /// Shortest password, in characters (not bytes).
@@ -38,7 +39,24 @@ unsafe extern "C" {
         user: *const c_char,
         aux: *mut *mut c_void,
     ) -> c_int;
+    fn pwquality_set_int_value(pwq: *mut c_void, setting: c_int, value: c_int) -> c_int;
+    fn pwquality_set_str_value(pwq: *mut c_void, setting: c_int, value: *const c_char) -> c_int;
 }
+
+// From pwquality.h.
+const PWQ_SETTING_DICT_PATH: c_int = 10;
+const PWQ_SETTING_DICT_CHECK: c_int = 15;
+const PWQ_ERROR_CRACKLIB_CHECK: c_int = -22;
+
+/// A password no dictionary holds. When cracklib cannot read its dictionary
+/// it refuses every password as a dictionary word, this one too; that is how
+/// a missing dictionary is told apart from a real dictionary hit, with no
+/// path and no (translated) message to compare.
+const DICT_PROBE: &CStr = c"Wq7#zK2!vR9$mX4%";
+
+/// The missing-dictionary warning is logged once per process, not on every
+/// key press.
+static DICT_WARNED: AtomicBool = AtomicBool::new(false);
 
 #[link(name = "crypt")]
 unsafe extern "C" {
@@ -248,6 +266,15 @@ impl Drop for Settings {
 }
 
 fn pwquality(password: &[u8], user: &str) -> Result<Score, PasswordError> {
+    pwquality_with(password, user, None)
+}
+
+/// [`pwquality`] with another dictionary path (tests).
+fn pwquality_with(
+    password: &[u8],
+    user: &str,
+    dict_path: Option<&CStr>,
+) -> Result<Score, PasswordError> {
     let pw = c_buf(password).ok_or(PasswordError::HasNul)?;
     let user_c = c_buf(user.as_bytes());
     // SAFETY: default_settings returns a fresh object or NULL.
@@ -260,6 +287,37 @@ fn pwquality(password: &[u8], user: &str) -> Result<Score, PasswordError> {
     // still a real check; ignore its result on purpose.
     // SAFETY: valid settings, NULL path means the default file, NULL aux.
     let _ = unsafe { pwquality_read_config(settings.0, ptr::null(), ptr::null_mut()) };
+    if let Some(path) = dict_path {
+        // SAFETY: valid settings and a NUL-terminated string (copied).
+        if unsafe { pwquality_set_str_value(settings.0, PWQ_SETTING_DICT_PATH, path.as_ptr()) } != 0
+        {
+            return Err(PasswordError::Unavailable);
+        }
+    }
+    // A missing or unreadable dictionary would refuse every password, so no
+    // account could be made: skip only the dictionary check then, and say so.
+    // SAFETY: valid settings and a NUL-terminated probe.
+    let probe = unsafe {
+        pwquality_check(
+            settings.0,
+            DICT_PROBE.as_ptr(),
+            ptr::null(),
+            ptr::null(),
+            ptr::null_mut(),
+        )
+    };
+    if probe == PWQ_ERROR_CRACKLIB_CHECK {
+        if !DICT_WARNED.swap(true, Ordering::Relaxed) {
+            log::warn!(
+                "the password dictionary cannot be read (cracklib-dicts missing?); \
+                 checking passwords without it"
+            );
+        }
+        // SAFETY: valid settings.
+        if unsafe { pwquality_set_int_value(settings.0, PWQ_SETTING_DICT_CHECK, 0) } != 0 {
+            return Err(PasswordError::Unavailable);
+        }
+    }
     let user_ptr = user_c.as_ref().map_or(ptr::null(), |u| u.as_ptr().cast());
     // SAFETY: all strings are NUL-terminated and outlive the call.
     let rc = unsafe {
@@ -423,6 +481,39 @@ mod tests {
             Err(PasswordError::Quality(_)) => {}
             other => panic!("expected a quality error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn dictionary_probe_passes_a_working_dictionary() {
+        // The image's dictionary (cracklib-dicts) is installed: the probe
+        // must not read as a dictionary word, or the check would always be
+        // skipped.
+        assert_ne!(
+            pwquality_with(DICT_PROBE.to_bytes(), "bob", None).err(),
+            Some(PasswordError::Quality(QualityIssue::Dictionary))
+        );
+    }
+
+    #[test]
+    fn missing_dictionary_skips_only_the_dictionary_check() {
+        let gone = Some(c"/nonexistent/pw_dict");
+        // Accepted, not refused as a dictionary word.
+        assert!(pwquality_with(GOOD, "bob", gone).is_ok());
+        // The other rules still apply.
+        match pwquality_with(b"abcdcba-abcdcba", "bob", gone) {
+            Err(PasswordError::Quality(q)) => assert_ne!(q, QualityIssue::Dictionary),
+            other => panic!("expected a non-dictionary quality error, got {other:?}"),
+        }
+        // A dictionary word passes the dictionary (none to look in), and
+        // the real dictionary still refuses it.
+        assert_ne!(
+            pwquality_with(b"password123", "bob", gone).err(),
+            Some(PasswordError::Quality(QualityIssue::Dictionary))
+        );
+        assert_eq!(
+            pwquality_with(b"password123", "bob", None).err(),
+            Some(PasswordError::Quality(QualityIssue::Dictionary))
+        );
     }
 
     #[test]
