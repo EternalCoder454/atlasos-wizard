@@ -49,8 +49,21 @@ Item {
         }
         return r;
     }
-    readonly property int position: Math.max(0, order.indexOf(currentIndex))
-    readonly property bool isLast: position >= order.length - 1
+    // How many shown pages come before this one. Counted rather than looked
+    // up with indexOf: a page can hide itself while it is the current one
+    // (Account does once it has made the user), and indexOf then gave -1,
+    // which became position 0, so Next jumped back to the first page after
+    // Welcome (Language, or Wi-Fi when the installer had set the language).
+    readonly property int position: {
+        let n = 0;
+        for (const i of order) {
+            if (i < currentIndex) {
+                ++n;
+            }
+        }
+        return n;
+    }
+    readonly property bool isLast: order.length === 0 || order[order.length - 1] <= currentIndex
     readonly property var page: currentIndex >= 0 && currentIndex < count ? pages[currentIndex] : null
     readonly property bool canAdvanceNow: page !== null && page["canAdvance"] !== false && !busy
     readonly property bool pageSkippable: page !== null && page["skippable"] === true
@@ -62,7 +75,7 @@ Item {
         if (control.isLast) {
             control.finished();
         } else {
-            control.currentIndex = control.order[control.position + 1];
+            control.currentIndex = control.order.find(i => i > control.currentIndex);
         }
     }
     function back(): void {

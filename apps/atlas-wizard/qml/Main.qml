@@ -211,7 +211,9 @@ AtlasWindow {
                 a.timezone ? call("timezone", a.timezone, "") : onboarding.next();
                 break;
             case "hostname":
-                call("hostname", a.hostname, "");
+                // The page's own value: answers only hold the name once it is
+                // edited, and sending "" for an untouched prefill failed.
+                call("hostname", p.hostname, "");
                 break;
             case "account":
                 root.waitingFor = "account";
@@ -283,7 +285,9 @@ AtlasWindow {
         }
         HostnamePage {
             hidden: !(root.startup.askHostname ?? false)
-            hostname: root.answers.hostname || (root.answers.userName ? root.answers.userName + "-pc" : "")
+            // A neutral name, the same as the image's DEFAULT_HOSTNAME. It was
+            // "<user>-pc", which put the account name on the network.
+            hostname: root.answers.hostname || "atlasos"
             onEdited: root.setAnswer("hostname", hostname)
         }
         AppearancePage {
