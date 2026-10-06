@@ -88,7 +88,9 @@ fn only_plasmas_marker_means_done_and_writes_ours() {
     s.prepare();
     assert_eq!(s.marker_state(), (true, true));
     assert_eq!(s.read("etc/plasma-setup-done"), "old\n", "left alone");
-    assert!(s.read("etc/atlasos/setup-done").contains("Wizard=0.1.0"));
+    // The marker names the version that wrote it (wizard-boot's own).
+    let ours = concat!("Wizard=", env!("CARGO_PKG_VERSION"));
+    assert!(s.read("etc/atlasos/setup-done").contains(ours));
     assert_eq!(s.dropin(), None);
 }
 
