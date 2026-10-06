@@ -5,7 +5,7 @@
 %global debug_package %{nil}
 
 Name:           atlas-wizard
-Version:        0.1.0
+Version:        0.1.1
 Release:        1%{?dist}
 Summary:        AtlasOS Setup, the first-run wizard of AtlasOS
 License:        MIT
@@ -210,5 +210,9 @@ done
 # /etc/atlasos is made by tmpfiles.d.
 
 %changelog
+* Tue Oct 06 2026 Atlas <atlas@eterneon.net> - 0.1.1-1
+- Next after Account no longer goes back to Wi-Fi or Language
+- The computer name is prefilled "atlasos", not "<user>-pc"
+
 * Fri Oct 02 2026 Atlas <atlas@eterneon.net> - 0.1.0-1
 - First package
