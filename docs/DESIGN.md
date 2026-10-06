@@ -297,7 +297,8 @@ Appearance, Privacy, Finish. First login: Fingerprint, PIN.
   characters, not the user name or full name, and libpwquality's check
   (dictionary included) passes.
 - **Hostname**: only when the static hostname is unset, `localhost*` or
-  `fedora`, prefilled `<user>-pc`.
+  `fedora`, prefilled `atlasos` (the image's `DEFAULT_HOSTNAME`; nothing
+  personal goes on the network unless the user types it).
 - **Appearance**: AtlasOS Light / Dark pictured as desktops, and accent
   swatches (violet first).
 - **Privacy**: "Send crash reports" off by default, with what a report holds.
