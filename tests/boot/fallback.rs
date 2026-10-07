@@ -175,7 +175,7 @@ fn creates_the_account_through_the_terminal() {
     let stdin = s.read("chpasswd.stdin");
     assert!(stdin.starts_with("ada:$y$"), "a yescrypt hash on stdin");
     assert!(!stdin.contains(GOOD));
-    assert_eq!(s.marker_state(), (true, true));
+    assert_eq!(s.marker_state(), (true, true, true));
     assert_eq!(s.state_json()["account"]["stage"], "verified");
     assert_eq!(s.state_json()["finish"], "markers");
     assert!(s.read("etc/shadow").contains("ada:$y$"));
@@ -277,7 +277,7 @@ fn a_piped_script_works_without_a_terminal() {
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(text.contains("Your account is ready"), "{text}");
     assert!(!text.contains(GOOD));
-    assert_eq!(s.marker_state(), (true, true));
+    assert_eq!(s.marker_state(), (true, true, true));
 }
 
 fn add_half_made(s: &Sys, stage: &str) {
@@ -354,7 +354,7 @@ fn an_account_that_exists_is_finished_without_asking() {
     let out = s.command("fallback").stdin(Stdio::null()).output().unwrap();
     assert!(out.status.success());
     assert!(!String::from_utf8_lossy(&out.stdout).contains("Full name"));
-    assert_eq!(s.marker_state(), (true, true));
+    assert_eq!(s.marker_state(), (true, true, true));
     assert!(s.commands().contains(&DM_CMD.to_string()));
 }
 
@@ -364,7 +364,7 @@ fn useradd_failure_is_told_in_plain_words_and_asked_again() {
     let mut t = Term::new();
     let mut child = s
         .command("fallback")
-        .env("ATLAS_WIZARD_TEST_FAIL", "useradd")
+        .env("TELAMON_WIZARD_TEST_FAIL", "useradd")
         .stdin(t.slave.try_clone().unwrap())
         .stdout(t.slave.try_clone().unwrap())
         .stderr(Stdio::null())
@@ -382,6 +382,6 @@ fn useradd_failure_is_told_in_plain_words_and_asked_again() {
     t.expect("Full name: ");
     signal(&child, "-TERM");
     assert!(wait_exit(&mut child, 15).success());
-    assert_eq!(s.marker_state(), (false, false));
+    assert_eq!(s.marker_state(), (false, false, false));
     assert!(!t.seen.contains(GOOD));
 }

@@ -1,4 +1,4 @@
-//! `atlas-wizard-helper apply-user-settings`: the child that writes the new
+//! `telamon-wizard-helper apply-user-settings`: the child that writes the new
 //! account's settings. It runs as that account (the helper dropped to its uid
 //! and gid before exec), reads the validated choices as JSON on stdin, and
 //! writes only under its own home.
@@ -221,18 +221,26 @@ pub fn apply(env: &Env<'_>, c: &Choices, tools: &dyn Tools) -> Result<(), Vec<St
             ),
         );
     }
-    let crash_dir = config.join("atlas");
-    step(
-        "crash-reporting.toml",
-        ensure_dir_under(env.home, &crash_dir, 0o700)
-            .and_then(|()| {
-                telamon_framework_system::crash::Settings {
-                    enabled: c.crash_reports,
-                }
-                .save_to(&crash_dir.join("crash-reporting.toml"))
-            })
-            .map_err(|e| e.to_string()),
-    );
+    // The choice goes where Telamon.Ui 2 apps read it (`~/.config/telamon`)
+    // and where Atlas.Ui 1.x apps, which have not moved yet, still do
+    // (`~/.config/atlas`).
+    for (dir, what) in [
+        ("telamon", "crash-reporting.toml"),
+        ("atlas", "crash-reporting.toml (Atlas.Ui 1.x apps)"),
+    ] {
+        let crash_dir = config.join(dir);
+        step(
+            what,
+            ensure_dir_under(env.home, &crash_dir, 0o700)
+                .and_then(|()| {
+                    telamon_framework_system::crash::Settings {
+                        enabled: c.crash_reports,
+                    }
+                    .save_to(&crash_dir.join("crash-reporting.toml"))
+                })
+                .map_err(|e| e.to_string()),
+        );
+    }
 
     // The look and the accent through KDE's own tools. A missing tool or a
     // failure is not fatal: the account still works, with the default look.
@@ -459,7 +467,7 @@ toolBarFont=Noto Sans,9,-1,5,400,0,0,0,0,0,0,0,0,0,0,1\nsmallestReadableFont=Not
         assert_eq!(ini_get(&kxkb, "Layout", "LayoutList"), Some("de"));
         assert_eq!(ini_get(&kxkb, "Layout", "VariantList"), Some("nodeadkeys"));
         assert_eq!(ini_get(&kxkb, "Layout", "Use"), Some("true"));
-        let crash = fs::read_to_string(home.join(".config/atlas/crash-reporting.toml")).unwrap();
+        let crash = fs::read_to_string(home.join(".config/telamon/crash-reporting.toml")).unwrap();
         assert!(crash.contains("enabled = true"), "{crash}");
         let mode = |p: &str| fs::metadata(home.join(p)).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode(".config"), 0o700);
@@ -507,7 +515,7 @@ toolBarFont=Noto Sans,9,-1,5,400,0,0,0,0,0,0,0,0,0,0,1\nsmallestReadableFont=Not
         assert!(!home.join(".config/kdeglobals").exists());
         assert!(!home.join(".config/kaccessrc").exists());
         assert!(!home.join(".config/kxkbrc").exists());
-        let crash = fs::read_to_string(home.join(".config/atlas/crash-reporting.toml")).unwrap();
+        let crash = fs::read_to_string(home.join(".config/telamon/crash-reporting.toml")).unwrap();
         assert!(crash.contains("enabled = false"), "{crash}");
         assert_eq!(tools.calls.borrow().len(), 2);
     }

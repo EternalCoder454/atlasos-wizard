@@ -1,0 +1,85 @@
+[Unit]
+Description=Telamon Wizard helper (creates the first account and finishes setup)
+Documentation=https://github.com/EternalCoder454/atlasos-wizard
+
+[Service]
+Type=dbus
+BusName=net.eterneon.telamon.WizardHelper
+ExecStart=/usr/libexec/telamon-wizard-helper
+# The helper exits by itself after 30 seconds without a call.
+#
+# Sandboxed as far as the helper's work allows. NONE OF THIS HAS BEEN RUN FOR
+# REAL YET: every line below, and the capability list above all, must be
+# verified in the Telamon OS VM (a full CreateAccount, Finish and EndSetup with
+# the unit as shipped, then `journalctl -u telamon-wizard-helper` for EPERM and
+# `ausearch -m avc` for denials) before it is relied on. `systemd-analyze
+# security` only scores the unit; it does not prove the helper still works.
+#
+# Left out on purpose:
+#   ProtectHome, ReadWritePaths, PrivateMounts: the helper writes /etc (the
+#     done markers, the autologin drop-in), /var/lib/telamon-wizard (the state)
+#     and the new account's home (through the settings child; /home is a link
+#     to /var/home on Telamon OS), and chage and usermod write /etc/shadow and
+#     /etc/passwd with lock files beside them. All are fixed paths, none comes
+#     from a caller. ProtectSystem=yes below makes only /usr and /boot
+#     read-only; a strict mount sandbox would need every writable path proven
+#     in a VM first.
+#   NoNewPrivileges: chage and usermod run in their own SELinux domains, and
+#     NoNewPrivileges blocks the transition. (RestrictSUIDSGID is on: it only
+#     stops this service creating setuid files, which it never does. The
+#     settings child sets no_new_privs for itself.)
+#   User=, DynamicUser=: it must be root: it writes /etc and switches to the
+#     new account's uid for the settings child.
+#   MemoryDenyWriteExecute, RestrictNamespaces, PrivateDevices: the settings
+#     child starts Qt programs (plasma-apply-lookandfeel and
+#     plasma-apply-colorscheme), and all three are inherited by them; Qt may
+#     need a writable and executable mapping or probe /dev/dri.
+#   PrivateNetwork: RestrictAddressFamilies=AF_UNIX below already leaves only
+#     the system bus and the journal.
+#   Creating the user: useradd runs inside AccountsService, in its own process
+#     and its own sandbox, never in this helper.
+PrivateTmp=yes
+ProtectSystem=yes
+ProtectProc=invisible
+ProcSubset=pid
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX
+# No core dump of a process that held a password (the helper also turns
+# dumpable off itself).
+LimitCORE=0
+# The commands the helper runs: chage and usermod (the lock), and itself as the
+# new account (the settings child). Only these, each for a reason:
+#   CAP_CHOWN: chage and usermod keep the owner of /etc/shadow and
+#     /etc/passwd when they rewrite them (backup and rename).
+#   CAP_FOWNER: the same rewrite keeps the mode (chmod on a file root does
+#     own, so it may be unneeded; the VM test decides, keep it until then).
+#   CAP_DAC_OVERRIDE: root writing /etc/shadow (mode 0000 on Fedora), and
+#     reading the new home to check it. (CAP_DAC_READ_SEARCH is not
+#     needed: CAP_DAC_OVERRIDE covers reads and searches too; the VM test
+#     decides.)
+#   CAP_SETUID, CAP_SETGID: the settings child drops to the new account's uid
+#     and gid before it exec's (and std clears its supplementary groups).
+#   CAP_KILL: killing the settings child's process group after its timeout,
+#     when it runs under another uid.
+# Not listed: CAP_AUDIT_WRITE (the audit record needs an AF_NETLINK socket,
+# which RestrictAddressFamilies=AF_UNIX blocks anyway; shadow-utils go on
+# without it).
+# Anything the commands need beyond these shows up as EPERM in the VM test.
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SETUID CAP_SETGID CAP_KILL
+UMask=0022
+# Stopping: the helper handles SIGTERM itself (refuses new calls, releases its
+# bus name, lets a running call finish). Every step it takes is recorded in
+# /var/lib/telamon-wizard/state.json first, so a kill at any point is resolved by
+# the next CreateAccount or Finish. KillMode=mixed sends SIGTERM to the helper
+# only and SIGKILL to leftovers when TimeoutStopSec runs out.
+KillMode=mixed
+TimeoutStopSec=30

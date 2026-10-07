@@ -1,4 +1,4 @@
-//! Runs the real `atlas-wizard-boot` (built with the `test-root` feature, see
+//! Runs the real `telamon-wizard-boot` (built with the `test-root` feature, see
 //! the crate's Cargo.toml) against temporary roots: one test per row of
 //! DESIGN.md's decision table, and the cases a power cut leaves behind.
 //! Commands are never run: the binary's fake runner records them in
@@ -11,9 +11,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-pub const BIN: &str = env!("CARGO_BIN_EXE_atlas-wizard-boot");
+pub const BIN: &str = env!("CARGO_BIN_EXE_telamon-wizard-boot");
 
-pub const DROPIN: &str = "[Autologin]\nUser=atlas-setup\nSession=atlas-wizard\nRelogin=true\n";
+pub const DROPIN: &str = "[Autologin]\nUser=telamon-setup\nSession=telamon-wizard\nRelogin=true\n";
 
 /// A temporary root with the files of a fresh, un-set-up machine.
 pub struct Sys {
@@ -36,13 +36,16 @@ impl Sys {
         let s = Sys { dir };
         s.write(
             "etc/passwd",
-            "root:x:0:0:root:/root:/bin/bash\natlas-setup:x:975:975:AtlasOS Setup:/run/atlas-setup:/bin/sh\n",
+            "root:x:0:0:root:/root:/bin/bash\ntelamon-setup:x:975:975:Telamon Setup:/run/telamon-setup:/bin/sh\n",
         );
         s.write(
             "etc/shadow",
-            "root:!:19000::::::\natlas-setup:!*:19000:0:99999:7:::\n",
+            "root:!:19000::::::\ntelamon-setup:!*:19000:0:99999:7:::\n",
         );
-        s.write("etc/group", "root:x:0:\nwheel:x:10:\natlas-setup:x:975:\n");
+        s.write(
+            "etc/group",
+            "root:x:0:\nwheel:x:10:\ntelamon-setup:x:975:\n",
+        );
         s.write("proc/cmdline", "BOOT_IMAGE=/vmlinuz root=/dev/sda2 quiet\n");
         s
     }
@@ -70,11 +73,11 @@ impl Sys {
     }
 
     pub fn state(&self, json: &str) {
-        self.write("var/lib/atlas-wizard/state.json", json);
+        self.write("var/lib/telamon-wizard/state.json", json);
     }
 
     pub fn state_json(&self) -> serde_json::Value {
-        serde_json::from_str(&self.read("var/lib/atlas-wizard/state.json")).unwrap_or_default()
+        serde_json::from_str(&self.read("var/lib/telamon-wizard/state.json")).unwrap_or_default()
     }
 
     /// A human account with a usable hash and a home.
@@ -95,13 +98,14 @@ impl Sys {
         let _ = std::os::unix::fs::chown(self.path(&format!("home/{name}")), Some(uid), Some(uid));
     }
 
-    /// Both done markers, as the wizard writes them.
+    /// The done markers, as the wizard writes them.
     pub fn markers(&self) {
+        self.write("etc/telamon/setup-done", "[Setup]\nVersion=1\n");
         self.write("etc/atlasos/setup-done", "[Setup]\nVersion=1\n");
         self.write("etc/plasma-setup-done", "done\n");
     }
 
-    pub fn lock_atlas_setup(&self) {
+    pub fn lock_setup_user(&self) {
         self.write(
             "etc/passwd",
             &self
@@ -111,8 +115,8 @@ impl Sys {
         self.write(
             "etc/shadow",
             &self.read("etc/shadow").replace(
-                "atlas-setup:!*:19000:0:99999:7:::",
-                "atlas-setup:!*:19000:0:99999:7::0:",
+                "telamon-setup:!*:19000:0:99999:7:::",
+                "telamon-setup:!*:19000:0:99999:7::0:",
             ),
         );
     }
@@ -127,8 +131,8 @@ impl Sys {
     pub fn command(&self, sub: &str) -> Command {
         let mut c = Command::new(BIN);
         c.arg(sub)
-            .env("ATLAS_WIZARD_TEST_ROOT", self.dir.path())
-            .env_remove("ATLAS_WIZARD_TEST_FAIL");
+            .env("TELAMON_WIZARD_TEST_ROOT", self.dir.path())
+            .env_remove("TELAMON_WIZARD_TEST_FAIL");
         c
     }
 
@@ -144,12 +148,14 @@ impl Sys {
     }
 
     pub fn dropin(&self) -> Option<String> {
-        let p = self.path("etc/plasmalogin.conf.d/99-atlas-wizard.conf");
+        let p = self.path("etc/plasmalogin.conf.d/99-telamon-wizard.conf");
         p.exists().then(|| fs::read_to_string(p).unwrap())
     }
 
-    pub fn marker_state(&self) -> (bool, bool) {
+    /// Which markers exist: Telamon's, Atlas Wizard's, plasma-setup's.
+    pub fn marker_state(&self) -> (bool, bool, bool) {
         (
+            self.exists("etc/telamon/setup-done"),
             self.exists("etc/atlasos/setup-done"),
             self.exists("etc/plasma-setup-done"),
         )
@@ -170,10 +176,11 @@ impl Sys {
 }
 
 pub const LOCK_CMDS: [&str; 2] = [
-    "/usr/bin/chage -E 0 atlas-setup",
-    "/usr/sbin/usermod -s /usr/sbin/nologin atlas-setup",
+    "/usr/bin/chage -E 0 telamon-setup",
+    "/usr/sbin/usermod -s /usr/sbin/nologin telamon-setup",
 ];
-pub const FALLBACK_CMD: &str = "/usr/bin/systemctl start --no-block atlas-wizard-fallback.service";
+pub const FALLBACK_CMD: &str =
+    "/usr/bin/systemctl start --no-block telamon-wizard-fallback.service";
 pub const DM_CMD: &str = "/usr/bin/systemctl start --no-block display-manager.service";
 
 #[test]
@@ -182,7 +189,7 @@ fn wrong_arguments_exit_2_and_touch_nothing() {
     for args in [vec![], vec!["bogus"], vec!["prepare", "extra"]] {
         let out = Command::new(BIN)
             .args(&args)
-            .env("ATLAS_WIZARD_TEST_ROOT", s.dir.path())
+            .env("TELAMON_WIZARD_TEST_ROOT", s.dir.path())
             .output()
             .unwrap();
         assert_eq!(out.status.code(), Some(2), "{args:?}");

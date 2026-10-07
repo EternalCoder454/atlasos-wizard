@@ -286,9 +286,10 @@ fn rig_with(o: Opts) -> Rig {
     let r = dir.path();
     for d in [
         "etc/skel",
+        "etc/telamon",
         "etc/atlasos",
         "etc/plasmalogin.conf.d",
-        "var/lib/atlas-wizard",
+        "var/lib/telamon-wizard",
         "home",
     ] {
         fs::create_dir_all(r.join(d)).unwrap();
@@ -296,22 +297,22 @@ fn rig_with(o: Opts) -> Rig {
     fs::write(r.join("etc/skel/.bashrc"), "").unwrap();
     fs::write(
         r.join("etc/passwd"),
-        "root:x:0:0:root:/root:/bin/bash\natlas-setup:x:970:970::/run/atlas-setup:/bin/sh\n",
+        "root:x:0:0:root:/root:/bin/bash\ntelamon-setup:x:970:970::/run/telamon-setup:/bin/sh\n",
     )
     .unwrap();
     fs::write(
         r.join("etc/shadow"),
-        "root:!:19000::::::\natlas-setup:!*:19000::::::\n",
+        "root:!:19000::::::\ntelamon-setup:!*:19000::::::\n",
     )
     .unwrap();
     fs::write(
         r.join("etc/group"),
-        "root:x:0:\nwheel:x:10:\natlas-setup:x:970:\n",
+        "root:x:0:\nwheel:x:10:\ntelamon-setup:x:970:\n",
     )
     .unwrap();
     fs::write(
-        r.join("etc/plasmalogin.conf.d/99-atlas-wizard.conf"),
-        "[Autologin]\nUser=atlas-setup\n",
+        r.join("etc/plasmalogin.conf.d/99-telamon-wizard.conf"),
+        "[Autologin]\nUser=telamon-setup\n",
     )
     .unwrap();
     let paths = Paths::with_root(r);
@@ -514,7 +515,7 @@ async fn a_creating_stage_has_no_uid_and_is_found_by_name() {
     fs::write(
         r.dir.path().join("etc/passwd"),
         format!(
-            "atlas-setup:x:970:970::/run/atlas-setup:/bin/sh\nada:x:{uid}:{uid}::/home/ada:/bin/bash\n"
+            "telamon-setup:x:970:970::/run/telamon-setup:/bin/sh\nada:x:{uid}:{uid}::/home/ada:/bin/bash\n"
         ),
     )
     .unwrap();
@@ -666,22 +667,22 @@ async fn finish_does_every_step_and_is_then_closed() {
     let drop_in = fs::read_to_string(
         r.dir
             .path()
-            .join("etc/plasmalogin.conf.d/50-atlas-autologin.conf"),
+            .join("etc/plasmalogin.conf.d/50-telamon-autologin.conf"),
     )
     .unwrap();
     assert_eq!(drop_in, "[Autologin]\nUser=ada\nSession=plasma\n");
-    assert!(markers::present(r.dir.path()).both());
+    assert!(markers::present(r.dir.path()).all());
     assert!(
         !r.dir
             .path()
-            .join("etc/plasmalogin.conf.d/99-atlas-wizard.conf")
+            .join("etc/plasmalogin.conf.d/99-telamon-wizard.conf")
             .exists()
     );
     assert_eq!(
         *r.runner.log.lock().unwrap(),
         vec![
-            "/usr/bin/chage -E 0 atlas-setup".to_string(),
-            "/usr/sbin/usermod -s /usr/sbin/nologin atlas-setup".to_string(),
+            "/usr/bin/chage -E 0 telamon-setup".to_string(),
+            "/usr/sbin/usermod -s /usr/sbin/nologin telamon-setup".to_string(),
         ]
     );
     assert_eq!(r.state().finish.as_deref(), Some(FINISH_DONE));
@@ -707,7 +708,7 @@ async fn finish_without_autologin_writes_no_drop_in() {
     assert!(
         !r.dir
             .path()
-            .join("etc/plasmalogin.conf.d/50-atlas-autologin.conf")
+            .join("etc/plasmalogin.conf.d/50-telamon-autologin.conf")
             .exists()
     );
 }
@@ -742,7 +743,7 @@ async fn a_failed_settings_child_leaves_setup_open_and_resumable() {
     assert!(
         r.dir
             .path()
-            .join("etc/plasmalogin.conf.d/99-atlas-wizard.conf")
+            .join("etc/plasmalogin.conf.d/99-telamon-wizard.conf")
             .exists()
     );
     assert_eq!(code(r.core.end_setup().await).1, "not-finished");
@@ -765,7 +766,7 @@ async fn finish_resumes_after_the_markers_with_only_the_clean_up() {
     assert!(
         !r.dir
             .path()
-            .join("etc/plasmalogin.conf.d/99-atlas-wizard.conf")
+            .join("etc/plasmalogin.conf.d/99-telamon-wizard.conf")
             .exists()
     );
     assert_eq!(r.runner.log.lock().unwrap().len(), 2);
@@ -780,7 +781,7 @@ async fn failing_lock_commands_do_not_fail_finish() {
     });
     r.create("ada", false).await.unwrap();
     r.core.finish(ChoiceMap::new()).await.unwrap();
-    assert!(markers::present(r.dir.path()).both());
+    assert!(markers::present(r.dir.path()).all());
 }
 
 #[tokio::test]
@@ -791,12 +792,12 @@ async fn give_up_records_removes_the_autologin_and_starts_the_fallback() {
     assert!(
         !r.dir
             .path()
-            .join("etc/plasmalogin.conf.d/99-atlas-wizard.conf")
+            .join("etc/plasmalogin.conf.d/99-telamon-wizard.conf")
             .exists()
     );
     assert_eq!(
         *r.systemd.log.lock().unwrap(),
-        vec!["start atlas-wizard-fallback.service".to_string()]
+        vec!["start telamon-wizard-fallback.service".to_string()]
     );
     // again: still fine
     r.core.give_up().await.unwrap();
@@ -835,17 +836,17 @@ async fn end_setup_redoes_a_missing_clean_up_once() {
     fs::write(
         r.dir
             .path()
-            .join("etc/plasmalogin.conf.d/99-atlas-wizard.conf"),
-        "[Autologin]\nUser=atlas-setup\n",
+            .join("etc/plasmalogin.conf.d/99-telamon-wizard.conf"),
+        "[Autologin]\nUser=telamon-setup\n",
     )
     .unwrap();
     r.runner
-        .rewrite("etc/shadow", "atlas-setup", |f| f[7] = String::new());
+        .rewrite("etc/shadow", "telamon-setup", |f| f[7] = String::new());
     r.core.end_setup().await.unwrap();
     assert!(
         !r.dir
             .path()
-            .join("etc/plasmalogin.conf.d/99-atlas-wizard.conf")
+            .join("etc/plasmalogin.conf.d/99-telamon-wizard.conf")
             .exists()
     );
     assert_eq!(r.runner.log.lock().unwrap().len(), 4, "the lock ran again");
@@ -858,7 +859,7 @@ async fn end_setup_does_not_restart_when_the_clean_up_cannot_be_completed() {
     finished(&r).await;
     // the shell is wrong and the lock commands do nothing
     r.runner
-        .rewrite("etc/passwd", "atlas-setup", |f| f[6] = "/bin/sh".into());
+        .rewrite("etc/passwd", "telamon-setup", |f| f[6] = "/bin/sh".into());
     *r.runner.ignore_first.lock().unwrap() = 2;
     let (k, c) = code(r.core.end_setup().await);
     assert_eq!((k, c.as_str()), (Kind::Failed, "cleanup-incomplete"));
@@ -870,15 +871,15 @@ async fn end_setup_does_not_restart_when_the_clean_up_cannot_be_completed() {
 fn the_expire_field_must_be_a_day_that_has_passed() {
     let r = rig();
     let shell = |f: &mut Vec<String>| f[6] = "/usr/sbin/nologin".into();
-    r.runner.rewrite("etc/passwd", "atlas-setup", shell);
+    r.runner.rewrite("etc/passwd", "telamon-setup", shell);
     let gaps = |expire: &str| {
         let e = expire.to_string();
         r.runner
-            .rewrite("etc/shadow", "atlas-setup", move |f| f[7] = e.clone());
+            .rewrite("etc/shadow", "telamon-setup", move |f| f[7] = e.clone());
         fs::remove_file(
             r.dir
                 .path()
-                .join("etc/plasmalogin.conf.d/99-atlas-wizard.conf"),
+                .join("etc/plasmalogin.conf.d/99-telamon-wizard.conf"),
         )
         .ok();
         r.core.cleanup_gaps()
@@ -969,7 +970,7 @@ async fn give_up_with_an_account_or_a_finish_under_way_starts_the_fallback() {
     assert!(r.state().gave_up);
     assert_eq!(
         *r.systemd.log.lock().unwrap(),
-        vec!["start atlas-wizard-fallback.service".to_string()]
+        vec!["start telamon-wizard-fallback.service".to_string()]
     );
 
     let r = rig();
@@ -981,7 +982,7 @@ async fn give_up_with_an_account_or_a_finish_under_way_starts_the_fallback() {
     r.core.give_up().await.unwrap();
     assert_eq!(
         *r.systemd.log.lock().unwrap(),
-        vec!["start atlas-wizard-fallback.service".to_string()]
+        vec!["start telamon-wizard-fallback.service".to_string()]
     );
 
     // a half-made account is still fine to give up on
@@ -1107,7 +1108,7 @@ async fn end_setup_accepts_any_non_login_shell() {
         let r = rig();
         finished(&r).await;
         r.runner
-            .rewrite("etc/passwd", "atlas-setup", |f| f[6] = shell.into());
+            .rewrite("etc/passwd", "telamon-setup", |f| f[6] = shell.into());
         assert!(r.core.cleanup_gaps().is_empty(), "{shell}");
         r.core.end_setup().await.unwrap();
         assert_eq!(r.runner.log.lock().unwrap().len(), 2, "no redo for {shell}");

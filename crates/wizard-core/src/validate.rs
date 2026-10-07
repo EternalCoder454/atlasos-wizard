@@ -19,6 +19,8 @@ pub const RESERVED_NAMES: &[&str] = &[
     "games",
     "ftp",
     "nobody",
+    "telamon-setup",
+    // Atlas Wizard's setup user, which a machine it set up still has.
     "atlas-setup",
     "plasma-setup",
     "plasmalogin",

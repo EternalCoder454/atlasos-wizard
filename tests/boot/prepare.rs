@@ -16,19 +16,19 @@ fn done_machine_gets_cleaned_up_and_locked() {
     let s = Sys::new();
     s.markers();
     s.add_human("ada", 1000);
-    s.write("etc/plasmalogin.conf.d/99-atlas-wizard.conf", DROPIN);
-    s.write("run/atlas-setup/answers.json", "{}");
+    s.write("etc/plasmalogin.conf.d/99-telamon-wizard.conf", DROPIN);
+    s.write("run/telamon-setup/answers.json", "{}");
     s.prepare();
     assert_eq!(s.dropin(), None, "the setup autologin is gone");
     assert_eq!(s.commands(), LOCK_CMDS);
-    assert!(s.files_under("run/atlas-setup").is_empty());
+    assert!(s.files_under("run/telamon-setup").is_empty());
     assert!(
         s.read("etc/shadow")
-            .contains("atlas-setup:!*:19000:0:99999:7::0:")
+            .contains("telamon-setup:!*:19000:0:99999:7::0:")
     );
     assert!(s.read("etc/passwd").contains("/usr/sbin/nologin"));
     assert!(
-        !s.exists("var/lib/atlas-wizard"),
+        !s.exists("var/lib/telamon-wizard"),
         "a done boot writes no state"
     );
 }
@@ -40,7 +40,7 @@ fn second_done_boot_runs_nothing_and_writes_nothing() {
     s.prepare();
     let after_first = s.commands();
     let shadow = s.read("etc/shadow");
-    let marker = fs::metadata(s.path("etc/atlasos/setup-done"))
+    let marker = fs::metadata(s.path("etc/telamon/setup-done"))
         .unwrap()
         .modified()
         .unwrap();
@@ -49,7 +49,7 @@ fn second_done_boot_runs_nothing_and_writes_nothing() {
     assert_eq!(s.commands(), after_first, "no command on a locked machine");
     assert_eq!(s.read("etc/shadow"), shadow);
     assert_eq!(
-        fs::metadata(s.path("etc/atlasos/setup-done"))
+        fs::metadata(s.path("etc/telamon/setup-done"))
             .unwrap()
             .modified()
             .unwrap(),
@@ -62,22 +62,115 @@ fn second_done_boot_runs_nothing_and_writes_nothing() {
 fn marker_present_but_dropin_still_there_is_a_power_cut_after_finish() {
     let s = Sys::new();
     s.markers();
-    s.lock_atlas_setup();
-    s.write("etc/plasmalogin.conf.d/99-atlas-wizard.conf", DROPIN);
+    s.lock_setup_user();
+    s.write("etc/plasmalogin.conf.d/99-telamon-wizard.conf", DROPIN);
     s.prepare();
     assert_eq!(s.dropin(), None);
     assert!(s.commands().is_empty(), "already locked: nothing to run");
 }
 
 #[test]
-fn only_our_marker_writes_plasmas() {
+fn only_our_marker_writes_the_others() {
+    let s = Sys::new();
+    s.write("etc/telamon/setup-done", "[Setup]\nVersion=1\n");
+    s.prepare();
+    assert_eq!(s.marker_state(), (true, true, true));
+    assert!(
+        s.read("etc/plasma-setup-done")
+            .contains("Setup completed by telamon-wizard")
+    );
+}
+
+/// A machine Atlas Wizard 0.1.x set up: done at once (no wizard, no
+/// autologin), ours is added with the old time, theirs stays as it is.
+#[test]
+fn a_machine_atlas_wizard_set_up_stays_done_and_gets_ours() {
+    let s = Sys::new();
+    let old = "[Setup]\nVersion=1\nFinished=2026-10-01T08:30:00Z\nWizard=0.1.1\n";
+    s.write("etc/atlasos/setup-done", old);
+    s.write(
+        "etc/plasma-setup-done",
+        "Setup completed by atlas-wizard at 2026-10-01T08:30:00Z\n",
+    );
+    s.lock_setup_user();
+    s.prepare();
+    assert_eq!(s.marker_state(), (true, true, true));
+    assert_eq!(
+        s.read("etc/atlasos/setup-done"),
+        old,
+        "theirs is left alone"
+    );
+    assert!(
+        s.read("etc/telamon/setup-done")
+            .contains("Finished=2026-10-01T08:30:00Z")
+    );
+    assert_eq!(s.dropin(), None, "no setup autologin");
+    assert!(!s.exists("var"), "no state, no wizard");
+    // The next boot writes nothing.
+    let before = s.read("etc/telamon/setup-done");
+    s.prepare();
+    assert_eq!(s.read("etc/telamon/setup-done"), before);
+}
+
+/// The autologin of Atlas Wizard names a user and a session that are gone.
+#[test]
+fn atlas_wizards_setup_autologin_is_removed() {
+    let s = Sys::new();
+    s.markers();
+    s.lock_setup_user();
+    s.write(
+        "etc/plasmalogin.conf.d/99-atlas-wizard.conf",
+        "[Autologin]\nUser=atlas-setup\nSession=atlas-wizard\nRelogin=true\n",
+    );
+    s.prepare();
+    assert!(!s.exists("etc/plasmalogin.conf.d/99-atlas-wizard.conf"));
+    assert_eq!(s.dropin(), None);
+}
+
+/// A machine Atlas Wizard set up still has its `atlas-setup`; one left open
+/// (setup cut short) is locked as well.
+#[test]
+fn atlas_setup_is_locked_too_when_the_machine_has_it() {
+    let s = Sys::new();
+    s.markers();
+    s.lock_setup_user();
+    let passwd = s.read("etc/passwd");
+    s.write(
+        "etc/passwd",
+        &format!("{passwd}atlas-setup:x:976:976:Telamon Setup:/run/atlas-setup:/bin/sh\n"),
+    );
+    let shadow = s.read("etc/shadow");
+    s.write(
+        "etc/shadow",
+        &format!("{shadow}atlas-setup:!*:19000:0:99999:7:::\n"),
+    );
+    s.prepare();
+    let calls = s.commands();
+    assert!(
+        calls.iter().any(|c| c.ends_with("chage -E 0 atlas-setup")),
+        "{calls:?}"
+    );
+    assert!(
+        calls
+            .iter()
+            .any(|c| c.ends_with("usermod -s /usr/sbin/nologin atlas-setup")),
+        "{calls:?}"
+    );
+    assert!(
+        calls.iter().all(|c| !c.contains("telamon-setup")),
+        "the locked telamon-setup is left alone: {calls:?}"
+    );
+}
+
+#[test]
+fn only_atlas_wizards_marker_means_done_and_writes_the_rest() {
     let s = Sys::new();
     s.write("etc/atlasos/setup-done", "[Setup]\nVersion=1\n");
     s.prepare();
-    assert_eq!(s.marker_state(), (true, true));
+    assert_eq!(s.marker_state(), (true, true, true));
     assert!(
         s.read("etc/plasma-setup-done")
-            .contains("Setup completed by atlas-wizard")
+            .contains("Setup completed by telamon-wizard")
     );
 }
 
@@ -86,23 +179,24 @@ fn only_plasmas_marker_means_done_and_writes_ours() {
     let s = Sys::new();
     s.write("etc/plasma-setup-done", "old\n");
     s.prepare();
-    assert_eq!(s.marker_state(), (true, true));
+    assert_eq!(s.marker_state(), (true, true, true));
     assert_eq!(s.read("etc/plasma-setup-done"), "old\n", "left alone");
     // The marker names the version that wrote it (wizard-boot's own).
     let ours = concat!("Wizard=", env!("CARGO_PKG_VERSION"));
+    assert!(s.read("etc/telamon/setup-done").contains(ours));
     assert!(s.read("etc/atlasos/setup-done").contains(ours));
     assert_eq!(s.dropin(), None);
 }
 
-// ---- row 2: atlas.wizard=skip
+// ---- row 2: telamon.wizard=skip (atlas.wizard=skip, its name until 0.2.0, too)
 
 #[test]
 fn skip_with_an_account_marks_done() {
     let s = Sys::new();
-    s.cmdline("atlas.wizard=skip");
+    s.cmdline("telamon.wizard=skip");
     s.add_human("ada", 1000);
     s.prepare();
-    assert_eq!(s.marker_state(), (true, true));
+    assert_eq!(s.marker_state(), (true, true, true));
     assert_eq!(s.dropin(), None);
     assert_eq!(s.commands(), LOCK_CMDS);
 }
@@ -112,7 +206,7 @@ fn skip_without_an_account_still_runs_the_wizard() {
     let s = Sys::new();
     s.cmdline("atlas.wizard=skip");
     s.prepare();
-    assert_eq!(s.marker_state(), (false, false));
+    assert_eq!(s.marker_state(), (false, false, false));
     assert_eq!(s.dropin().as_deref(), Some(DROPIN));
 }
 
@@ -123,7 +217,7 @@ fn a_foreign_account_marks_done() {
     let s = Sys::new();
     s.add_human("anaconda", 1000);
     s.prepare();
-    assert_eq!(s.marker_state(), (true, true));
+    assert_eq!(s.marker_state(), (true, true, true));
     assert_eq!(s.dropin(), None);
     assert_eq!(s.commands(), LOCK_CMDS);
 }
@@ -148,10 +242,10 @@ fn verified_account_resumes_the_wizard() {
 fn verified_account_after_three_boots_finishes_with_defaults() {
     let s = Sys::new();
     s.add_human("ada", 1000);
-    s.write("etc/plasmalogin.conf.d/99-atlas-wizard.conf", DROPIN);
+    s.write("etc/plasmalogin.conf.d/99-telamon-wizard.conf", DROPIN);
     s.state(&verified(3));
     let out = s.prepare();
-    assert_eq!(s.marker_state(), (true, true));
+    assert_eq!(s.marker_state(), (true, true, true));
     assert_eq!(s.dropin(), None);
     assert_eq!(s.commands(), LOCK_CMDS);
     assert_eq!(s.state_json()["finish"], "markers");
@@ -170,7 +264,7 @@ fn verified_account_whose_finish_began_is_finished() {
         r#"{"format":1,"boots":1,"account":{"name":"ada","uid":1000,"stage":"verified"},"finish":"markers"}"#,
     );
     s.prepare();
-    assert_eq!(s.marker_state(), (true, true));
+    assert_eq!(s.marker_state(), (true, true, true));
 }
 
 // ---- row 6: fallback
@@ -178,12 +272,12 @@ fn verified_account_whose_finish_began_is_finished() {
 #[test]
 fn gave_up_starts_the_text_fallback() {
     let s = Sys::new();
-    s.write("etc/plasmalogin.conf.d/99-atlas-wizard.conf", DROPIN);
+    s.write("etc/plasmalogin.conf.d/99-telamon-wizard.conf", DROPIN);
     s.state(r#"{"format":1,"boots":1,"gave_up":true}"#);
     s.prepare();
     assert_eq!(s.dropin(), None, "no setup autologin in text mode");
     assert_eq!(s.commands(), [FALLBACK_CMD]);
-    assert_eq!(s.marker_state(), (false, false));
+    assert_eq!(s.marker_state(), (false, false, false));
 }
 
 #[test]
@@ -212,7 +306,7 @@ fn fallback_command_line_with_a_verified_account_finishes_with_defaults() {
         s.add_human("ada", 1000);
         s.state(&verified(boots));
         s.prepare();
-        assert_eq!(s.marker_state(), (true, true), "boots {boots}");
+        assert_eq!(s.marker_state(), (true, true, true), "boots {boots}");
         assert_eq!(s.dropin(), None);
         assert!(!s.commands().contains(&FALLBACK_CMD.to_string()));
     }
@@ -221,20 +315,20 @@ fn fallback_command_line_with_a_verified_account_finishes_with_defaults() {
 #[test]
 fn a_locked_setup_user_is_unlocked_when_the_wizard_must_run() {
     let s = Sys::new();
-    s.lock_atlas_setup();
+    s.lock_setup_user();
     s.prepare();
     assert_eq!(s.dropin().as_deref(), Some(DROPIN));
     assert_eq!(
         s.commands(),
         [
-            "/usr/bin/chage -E -1 atlas-setup",
-            "/usr/sbin/usermod -s /bin/sh atlas-setup"
+            "/usr/bin/chage -E -1 telamon-setup",
+            "/usr/sbin/usermod -s /bin/sh telamon-setup"
         ]
     );
     assert!(s.read("etc/passwd").contains(":/bin/sh\n"));
     assert!(
         !s.read("etc/shadow")
-            .contains("atlas-setup:!*:19000:0:99999:7::0:")
+            .contains("telamon-setup:!*:19000:0:99999:7::0:")
     );
     s.prepare();
     assert_eq!(s.commands().len(), 2, "a healthy boot runs nothing");
@@ -259,7 +353,7 @@ fn first_boot_writes_the_autologin_and_counts() {
     assert!(s.commands().is_empty());
     let mode = {
         use std::os::unix::fs::PermissionsExt;
-        fs::metadata(s.path("etc/plasmalogin.conf.d/99-atlas-wizard.conf"))
+        fs::metadata(s.path("etc/plasmalogin.conf.d/99-telamon-wizard.conf"))
             .unwrap()
             .permissions()
             .mode()
@@ -267,7 +361,7 @@ fn first_boot_writes_the_autologin_and_counts() {
     };
     assert_eq!(mode, 0o644);
     assert!(
-        fs::metadata(s.path("var/lib/atlas-wizard/state.json"))
+        fs::metadata(s.path("var/lib/telamon-wizard/state.json"))
             .unwrap()
             .len()
             > 0
@@ -292,7 +386,7 @@ fn wizard_runs_three_boots_then_the_fallback_takes_over() {
 #[test]
 fn state_file_missing_is_a_first_boot() {
     let s = Sys::new();
-    assert!(!s.exists("var/lib/atlas-wizard/state.json"));
+    assert!(!s.exists("var/lib/telamon-wizard/state.json"));
     s.prepare();
     assert_eq!(s.state_json()["boots"], 1);
 }
@@ -304,7 +398,7 @@ fn truncated_state_is_moved_aside_and_treated_as_empty() {
     let out = s.prepare();
     assert_eq!(s.state_json()["boots"], 1, "treated as empty");
     assert_eq!(s.dropin().as_deref(), Some(DROPIN));
-    let files = s.files_under("var/lib/atlas-wizard");
+    let files = s.files_under("var/lib/telamon-wizard");
     assert!(
         files.iter().any(|f| f.starts_with("state.json.bad-")),
         "{files:?}"
@@ -318,14 +412,14 @@ fn a_leftover_temp_file_from_a_cut_write_is_ignored() {
     let s = Sys::new();
     s.state(r#"{"format":1,"boots":1}"#);
     s.write(
-        "var/lib/atlas-wizard/.state.json.tmp-123-0",
+        "var/lib/telamon-wizard/.state.json.tmp-123-0",
         r#"{"format":1,"boots":99,"gave_"#,
     );
     s.prepare();
     assert_eq!(s.state_json()["boots"], 2);
     // And with no state file at all, only the temp file.
     let t = Sys::new();
-    t.write("var/lib/atlas-wizard/.state.json.tmp-123-0", "{");
+    t.write("var/lib/telamon-wizard/.state.json.tmp-123-0", "{");
     t.prepare();
     assert_eq!(t.state_json()["boots"], 1);
     assert_eq!(t.dropin().as_deref(), Some(DROPIN));
@@ -363,7 +457,7 @@ fn a_half_made_account_is_left_to_the_helper() {
     assert_eq!(s.state_json()["boots"], 2);
     assert_eq!(s.state_json()["account"]["stage"], "created", "kept");
     assert!(s.commands().is_empty(), "prepare never deletes accounts");
-    assert_eq!(s.marker_state(), (false, false));
+    assert_eq!(s.marker_state(), (false, false, false));
 }
 
 #[test]
@@ -385,7 +479,7 @@ fn an_unknown_stage_from_a_newer_wizard_is_kept() {
 fn an_unreadable_state_means_text_mode_not_a_loop() {
     let s = Sys::new();
     // A directory where the file belongs: reading it fails.
-    fs::create_dir_all(s.path("var/lib/atlas-wizard/state.json")).unwrap();
+    fs::create_dir_all(s.path("var/lib/telamon-wizard/state.json")).unwrap();
     s.prepare();
     assert_eq!(s.commands(), [FALLBACK_CMD]);
     assert_eq!(s.dropin(), None);
@@ -405,7 +499,10 @@ fn failing_commands_never_fail_the_boot() {
     s.markers();
     let out = s
         .command("prepare")
-        .env("ATLAS_WIZARD_TEST_FAIL", "chage,usermod,systemctl,loginctl")
+        .env(
+            "TELAMON_WIZARD_TEST_FAIL",
+            "chage,usermod,systemctl,loginctl",
+        )
         .output()
         .unwrap();
     assert!(out.status.success());
@@ -420,7 +517,7 @@ fn a_failing_fallback_start_does_not_fail_the_boot() {
     s.state(r#"{"format":1,"gave_up":true}"#);
     let out = s
         .command("prepare")
-        .env("ATLAS_WIZARD_TEST_FAIL", "systemctl")
+        .env("TELAMON_WIZARD_TEST_FAIL", "systemctl")
         .output()
         .unwrap();
     assert!(out.status.success());
@@ -432,11 +529,11 @@ fn passwd_that_cannot_be_read_changes_nothing() {
     // A directory where passwd belongs: not "no accounts".
     fs::remove_file(s.path("etc/passwd")).unwrap();
     fs::create_dir(s.path("etc/passwd")).unwrap();
-    s.write("etc/plasmalogin.conf.d/99-atlas-wizard.conf", DROPIN);
+    s.write("etc/plasmalogin.conf.d/99-telamon-wizard.conf", DROPIN);
     s.prepare();
     assert_eq!(s.dropin().as_deref(), Some(DROPIN), "left as it was");
     assert!(!s.exists("var"));
-    assert_eq!(s.marker_state(), (false, false));
+    assert_eq!(s.marker_state(), (false, false, false));
 }
 
 #[test]

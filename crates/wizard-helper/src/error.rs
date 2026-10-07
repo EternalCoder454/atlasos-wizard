@@ -7,7 +7,7 @@
 
 use std::fmt;
 
-/// Which of the five `net.eterneon.atlas.Error.*` names an error has.
+/// Which of the five `net.eterneon.telamon.Error.*` names an error has.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
     /// polkit said no, or the caller is not the setup user.
@@ -97,7 +97,7 @@ impl std::error::Error for HelperError {}
 
 /// The error type of the D-Bus methods.
 #[derive(Debug, zbus::DBusError)]
-#[zbus(prefix = "net.eterneon.atlas.Error")]
+#[zbus(prefix = "net.eterneon.telamon.Error")]
 pub enum DbusError {
     /// zbus's own errors (a malformed call and the like).
     #[zbus(error)]
@@ -152,7 +152,7 @@ mod tests {
             use zbus::DBusError as _;
             assert_eq!(
                 d.name().as_str(),
-                format!("net.eterneon.atlas.Error.{name}")
+                format!("net.eterneon.telamon.Error.{name}")
             );
         }
     }

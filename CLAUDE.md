@@ -1,7 +1,7 @@
-# AtlasOS Wizard
+# Telamon Wizard
 
-AtlasOS's first-run setup: Rust + CXX-Qt + Qt 6.11 Quick + Kirigami on Atlas
-Framework (`v1.4.0`), for AtlasOS, a Fedora Kinoite 44 bootc image (repo
+Telamon OS's first-run setup: Rust + CXX-Qt + Qt 6.11 Quick + Kirigami on the
+Telamon framework (`v2.0.0`), for Telamon OS, a Fedora Kinoite 44 bootc image (repo
 `~/Documents/Projects/AtlasOS/AtlasOS`, read-only from here). Read
 `docs/DESIGN.md` first: it fixes the programs, the helper's methods, the
 polkit rules, the state file and every recovery path. Change it only together
@@ -22,7 +22,7 @@ Updater's (`~/Documents/Projects/AtlasOS/Atlas Updater`,
 - **Never run anything privileged on the host**: the helper, `prepare`, the
   fallback, `useradd`, AccountsService calls. They run in the container
   against a private system bus and a throwaway root, and for real in the
-  AtlasOS VM (the "AtlasOS" session runs it).
+  Telamon OS VM (the "AtlasOS" session runs it).
 - **Never run the GUI on the user's display.** `QT_QPA_PLATFORM=offscreen`, or
   `xvfb-run -a -s "-screen 0 1920x1080x24"` inside `dbus-run-session`, in the
   container.
@@ -43,6 +43,10 @@ Updater's (`~/Documents/Projects/AtlasOS/Atlas Updater`,
 - Commit only the paths you own (`git commit -- <paths>`), as
   `EternalHell <77252745+EternalCoder454@users.noreply.github.com>`. Don't
   push; the repository is not on GitHub yet.
+- **The old names (Atlas Wizard 0.1.x) still work for one release**: the old
+  units, programs, done marker, state and installer.ini paths, the kernel
+  command line and the setup autologin's removal (DESIGN.md, "The names until
+  0.2.0"). Do not remove them before the image and the installer have moved.
 - MIT. Wording follows KDE: Title Case buttons and titles, US spelling,
   `qsTr()` for every string a user reads.
 
@@ -53,23 +57,23 @@ Updater's (`~/Documents/Projects/AtlasOS/Atlas Updater`,
 | Format | `scripts/dev.sh cargo fmt --all --check` |
 | Lint | `scripts/dev.sh cargo clippy --workspace --all-targets --locked -- -D warnings` |
 | Tests | `scripts/dev.sh cargo test --workspace --locked` |
-| App build | `scripts/dev.sh bash -c 'cmake -S apps/atlas-wizard -B build/dev -G Ninja && cmake --build build/dev'` |
-| Smoke run | `scripts/dev.sh dbus-run-session -- env QT_QPA_PLATFORM=offscreen ATLAS_WIZARD_DEMO=1 build/dev/atlas-wizard` |
-| Atlas checks | `~/Documents/Atlas\ Framework/tools/lint-app.sh . && ~/Documents/Atlas\ Framework/tools/check-app-names.sh .` (host, read-only scripts) |
+| App build | `scripts/dev.sh bash -c 'cmake -S apps/telamon-wizard -B build/dev -G Ninja && cmake --build build/dev'` |
+| Smoke run | `scripts/dev.sh dbus-run-session -- env QT_QPA_PLATFORM=offscreen TELAMON_WIZARD_DEMO=1 build/dev/telamon-wizard` |
+| Telamon checks | `<framework v2.0.0>/tools/lint-app.sh . && <framework v2.0.0>/tools/check-app-names.sh .` (read-only scripts; the dev image has the framework at `$TELAMON_FRAMEWORK`) |
 | RPM | `scripts/dev.sh packaging/build-rpm.sh /src/out` |
 
-`scripts/dev.sh` builds `localhost/atlas-wizard-dev:44` from `ci/Containerfile`
+`scripts/dev.sh` builds `localhost/telamon-wizard-dev:44` from `ci/Containerfile`
 (the one list of packages; CI runs in the same file's `ci` target, published
-as `ghcr.io/eternalcoder454/atlas-wizard-dev` by `dev-image.yml`). It builds
+as `ghcr.io/eternalcoder454/telamon-wizard-dev` by `dev-image.yml`). It builds
 telamon-ui and telamon-symbols-fonts from the atlas-framework tag in `Cargo.toml`
 (needs network), and rebuilds by itself when the Containerfile, the spec's
 BuildRequires or that tag change (`ci/image-tag.sh`).
-`ATLAS_FRAMEWORK_REF=<tag or branch>` builds against another framework ref.
-`ATLAS_LOCAL_RPMS` is gone. CI (`.github/workflows/ci.yml`) runs the Format,
+`TELAMON_FRAMEWORK_REF=<tag or branch>` builds against another framework ref.
+`TELAMON_LOCAL_RPMS` is gone. CI (`.github/workflows/ci.yml`) runs the Format,
 Lint, Tests and RPM rows above plus qmllint, shellcheck and
 `desktop-file-validate`, with mold as the linker (`RUSTFLAGS` there only).
 
-`ATLAS_WIZARD_DEMO=1` runs the GUI with no helper and no system services
+`TELAMON_WIZARD_DEMO=1` runs the GUI with no helper and no system services
 (every call answers from canned data), for screenshots and layout work.
 
 ## Moving the atlas-framework pin
@@ -77,5 +81,5 @@ Lint, Tests and RPM rows above plus qmllint, shellcheck and
 Change `tag` in `Cargo.toml`, then `scripts/dev.sh cargo update -p telamon-framework-ui -p telamon-framework-system`.
 CI and the dev image follow the tag by themselves (`ci/framework-ref.sh`).
 When the app uses
-something new in Telamon.Ui, `ui:` in `apps/atlas-wizard/src/lib.rs` and
+something new in Telamon.Ui, `ui:` in `apps/telamon-wizard/src/lib.rs` and
 `telamon-ui >=` in the spec (Requires and BuildRequires) together.

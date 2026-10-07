@@ -241,7 +241,7 @@ mod tests {
     const PASSWD: &str = "\
 root:x:0:0:root:/root:/bin/bash
 nobody:x:65534:65534:Kernel Overflow User:/:/sbin/nologin
-atlas-setup:x:970:970:AtlasOS Setup:/run/atlas-setup:/bin/sh
+telamon-setup:x:970:970:Telamon Setup:/run/telamon-setup:/bin/sh
 ada:x:1000:1000:Ada:/home/ada:/bin/bash
 nologin1:x:1001:1001::/home/nologin1:/usr/sbin/nologin
 false1:x:1002:1002::/home/false1:/bin/false

@@ -1,5 +1,5 @@
-//! `/etc/atlasos/installer.ini`, written by Atlas Installer (DESIGN.md,
-//! Pages). Anything wrong with the file means "every page shows".
+//! `/etc/telamon/installer.ini` (or `/etc/atlasos/installer.ini`), written by
+//! the installer (DESIGN.md, Pages). Anything wrong with the file means "every page shows".
 
 use crate::choices::{xkb_layout, xkb_variant};
 use crate::ini::Ini;
@@ -8,7 +8,11 @@ use std::io::{self, Read};
 use std::path::Path;
 
 /// Where the installer leaves its answers.
-pub const DEFAULT_PATH: &str = "/etc/atlasos/installer.ini";
+pub const DEFAULT_PATH: &str = "/etc/telamon/installer.ini";
+
+/// Where Atlas Installer left them (until Telamon Installer 0.x; it writes
+/// both for one release). Read when [`DEFAULT_PATH`] does not exist.
+pub const LEGACY_PATH: &str = "/etc/atlasos/installer.ini";
 
 /// Largest file read; anything bigger is treated as garbage.
 const MAX_BYTES: u64 = 64 * 1024;
@@ -91,6 +95,25 @@ impl Loaded {
     }
 }
 
+/// [`load`] of [`DEFAULT_PATH`], or of [`LEGACY_PATH`] when there is no
+/// such file.
+pub fn load_default() -> Loaded {
+    load_either(Path::new(DEFAULT_PATH), Path::new(LEGACY_PATH))
+}
+
+/// [`load`] of `new`, or of `old` when `new` does not exist (a file that
+/// exists but is wrong counts: the installer that wrote it is the new one).
+pub fn load_either(new: &Path, old: &Path) -> Loaded {
+    let l = load(new);
+    if l.reason == Some(Reason::Missing) {
+        let o = load(old);
+        if o.reason != Some(Reason::Missing) {
+            return o;
+        }
+    }
+    l
+}
+
 /// Reads and parses the file. Never fails: see [`Loaded::reason`].
 pub fn load(path: &Path) -> Loaded {
     let file = match File::open(path) {
@@ -159,6 +182,25 @@ mod tests {
                 .join("tests/fixtures/installer")
                 .join(name),
         )
+    }
+
+    #[test]
+    fn the_new_path_wins_and_the_old_one_is_read_when_it_is_missing() {
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/installer");
+        let full = fixtures.join("full.ini");
+        let empty = fixtures.join("empty-values.ini");
+        let none = fixtures.join("none.ini");
+        // Only the old file (a machine Atlas Installer made).
+        assert_eq!(load_either(&none, &full), load(&full));
+        assert!(load_either(&none, &full).reason.is_none());
+        // Both: the new one.
+        assert_eq!(load_either(&full, &empty), load(&full));
+        assert_eq!(load_either(&empty, &full), load(&empty));
+        // Neither.
+        assert_eq!(load_either(&none, &none).reason, Some(Reason::Missing));
+        // A wrong new file is not covered by the old one.
+        let junk = fixtures.join("garbage.ini");
+        assert_eq!(load_either(&junk, &full), load(&junk));
     }
 
     #[test]

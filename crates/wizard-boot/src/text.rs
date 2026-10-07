@@ -4,7 +4,7 @@
 use wizard_core::password::{HashError, PasswordError, QualityIssue};
 use wizard_core::validate::{FullNameError, NameError};
 
-pub const INTRO: &str = "\nWelcome to AtlasOS.\n\
+pub const INTRO: &str = "\nWelcome to Telamon OS.\n\
 The graphical setup could not start. Create your account here.\n\
 (Press Ctrl+C at any question to start over.)\n";
 pub const ASK_FULL_NAME: &str = "Full name: ";

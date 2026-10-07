@@ -43,7 +43,7 @@ pub const AUTOLOGIN_KEY: &str = "autologin";
 /// The unit `EndSetup` restarts.
 pub const DISPLAY_MANAGER: &str = "display-manager.service";
 /// The unit `GiveUp` starts.
-pub const FALLBACK_UNIT: &str = "atlas-wizard-fallback.service";
+pub const FALLBACK_UNIT: &str = "telamon-wizard-fallback.service";
 
 /// A value of the `Finish` choices map, as the D-Bus layer converts it.
 pub type ChoiceMap = BTreeMap<String, choices::Value>;
@@ -538,12 +538,19 @@ impl Core {
         Ok(())
     }
 
-    /// Removes `99-atlas-wizard.conf`; a missing file is fine.
+    /// Removes `99-telamon-wizard.conf`, and Atlas Wizard's
+    /// `99-atlas-wizard.conf` (which names a user and a session that are
+    /// gone); a missing file is fine.
     fn remove_setup_autologin(&self) -> bool {
-        match std::fs::remove_file(self.paths.setup_autologin()) {
+        let legacy = self.remove_autologin_file(&self.paths.legacy_setup_autologin());
+        self.remove_autologin_file(&self.paths.setup_autologin()) && legacy
+    }
+
+    fn remove_autologin_file(&self, path: &std::path::Path) -> bool {
+        match std::fs::remove_file(path) {
             Ok(()) => {
                 log::info!("removed the setup autologin");
-                if let Some(dir) = self.paths.setup_autologin().parent()
+                if let Some(dir) = path.parent()
                     && let Err(e) = wizard_core::fsutil::sync_dir(dir)
                 {
                     log::error!("cannot sync the autologin directory: {}", e.kind());
@@ -649,9 +656,17 @@ impl Core {
     /// counts as not in place.
     fn cleanup_gaps(&self) -> Vec<&'static str> {
         let mut gaps = Vec::new();
-        match std::fs::symlink_metadata(self.paths.setup_autologin()) {
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            _ => gaps.push("autologin-drop-in"),
+        for dropin in [
+            self.paths.setup_autologin(),
+            self.paths.legacy_setup_autologin(),
+        ] {
+            match std::fs::symlink_metadata(dropin) {
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                _ => {
+                    gaps.push("autologin-drop-in");
+                    break;
+                }
+            }
         }
         let user = self.paths.setup_user();
         let today = SystemTime::now()

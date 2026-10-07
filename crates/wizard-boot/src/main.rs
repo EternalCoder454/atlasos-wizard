@@ -1,7 +1,7 @@
-//! `atlas-wizard-boot prepare | fallback`; see the library for what they do.
+//! `telamon-wizard-boot prepare | fallback`; see the library for what they do.
 
-use telamon_framework_core::AppInfo;
 use std::process::ExitCode;
+use telamon_framework_core::AppInfo;
 use wizard_boot::cmd::{Runner, SystemRunner};
 use wizard_boot::console::Tty;
 use wizard_boot::fallback::{self, Outcome};
@@ -12,9 +12,9 @@ use wizard_boot::{prepare, sig};
 /// build with a test root the fake that edits files under the root.
 fn runner(paths: &Paths) -> Box<dyn Runner> {
     #[cfg(feature = "test-root")]
-    if std::env::var_os("ATLAS_WIZARD_TEST_ROOT").is_some() {
+    if std::env::var_os("TELAMON_WIZARD_TEST_ROOT").is_some() {
         let fake = wizard_boot::fake::Fake::new(paths);
-        let fake = match std::env::var("ATLAS_WIZARD_TEST_FAIL") {
+        let fake = match std::env::var("TELAMON_WIZARD_TEST_FAIL") {
             Ok(list) => fake.failing_list(&list),
             Err(_) => fake,
         };
@@ -25,16 +25,16 @@ fn runner(paths: &Paths) -> Box<dyn Runner> {
 }
 
 fn main() -> ExitCode {
-    // The journal identifier is `atlas-wizard-boot` (from the id below).
+    // The journal identifier is `telamon-wizard-boot` (from the id below).
     telamon_framework_core::log::init(&AppInfo {
-        name: "Atlas Wizard Boot".into(),
-        id: "net.eterneon.atlas.wizard-boot".into(),
+        name: "Telamon Wizard Boot".into(),
+        id: "net.eterneon.telamon.wizard-boot".into(),
         version: env!("CARGO_PKG_VERSION").into(),
         repo: "atlasos-wizard".into(),
     });
     let mut args = std::env::args().skip(1);
     let (Some(cmd), None) = (args.next(), args.next()) else {
-        eprintln!("usage: atlas-wizard-boot prepare | fallback");
+        eprintln!("usage: telamon-wizard-boot prepare | fallback");
         return ExitCode::from(2);
     };
     let paths = Paths::system();
@@ -70,7 +70,7 @@ fn main() -> ExitCode {
             }
         }
         _ => {
-            eprintln!("usage: atlas-wizard-boot prepare | fallback");
+            eprintln!("usage: telamon-wizard-boot prepare | fallback");
             ExitCode::from(2)
         }
     }

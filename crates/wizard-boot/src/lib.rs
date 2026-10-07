@@ -1,4 +1,4 @@
-//! `atlas-wizard-boot`: `prepare` (every boot, before the display manager) and
+//! `telamon-wizard-boot`: `prepare` (every boot, before the display manager) and
 //! `fallback` (text-mode account creation). The decisions are
 //! `wizard_core::boot`'s; this crate gathers what they need and acts.
 //!

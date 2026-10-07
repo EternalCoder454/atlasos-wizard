@@ -1,4 +1,4 @@
-//! The D-Bus face: `net.eterneon.atlas.WizardHelper1`, the authorization of
+//! The D-Bus face: `net.eterneon.telamon.WizardHelper1`, the authorization of
 //! every call (the caller's uid, then polkit), the idle exit and shutdown.
 
 use std::collections::{BTreeMap, HashMap};
@@ -17,16 +17,16 @@ use crate::error::{DbusError, HelperError};
 use crate::paths::Paths;
 
 /// The well-known bus name.
-pub const BUS_NAME: &str = "net.eterneon.atlas.WizardHelper";
+pub const BUS_NAME: &str = "net.eterneon.telamon.WizardHelper";
 /// The object path.
-pub const OBJECT_PATH: &str = "/net/eterneon/atlas/WizardHelper";
+pub const OBJECT_PATH: &str = "/net/eterneon/telamon/WizardHelper";
 
 /// polkit action of `CreateAccount`.
-pub const ACTION_CREATE: &str = "net.eterneon.atlas.wizard.create-account";
+pub const ACTION_CREATE: &str = "net.eterneon.telamon.wizard.create-account";
 /// polkit action of `Finish` and `EndSetup`.
-pub const ACTION_FINISH: &str = "net.eterneon.atlas.wizard.finish";
+pub const ACTION_FINISH: &str = "net.eterneon.telamon.wizard.finish";
 /// polkit action of `GiveUp`.
-pub const ACTION_FALLBACK: &str = "net.eterneon.atlas.wizard.fallback";
+pub const ACTION_FALLBACK: &str = "net.eterneon.telamon.wizard.fallback";
 
 /// Most keys a `Finish` choices map may have (the real one has seven).
 const MAX_CHOICE_KEYS: usize = 16;
@@ -213,7 +213,7 @@ async fn check_polkit(
 }
 
 /// The caller's uid (asked of the bus daemon, never an argument) against
-/// `atlas-setup`'s.
+/// `telamon-setup`'s.
 async fn check_uid(
     paths: &Paths,
     header: &Header<'_>,
@@ -295,7 +295,7 @@ pub fn choices_from_dbus(m: &HashMap<String, OwnedValue>) -> Result<ChoiceMap, H
     Ok(out)
 }
 
-#[zbus::interface(name = "net.eterneon.atlas.WizardHelper1")]
+#[zbus::interface(name = "net.eterneon.telamon.WizardHelper1")]
 impl Service {
     /// Creates the first account; returns its uid.
     async fn create_account(

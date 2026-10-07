@@ -1,4 +1,4 @@
-//! `atlas-wizard-helper`: the D-Bus activated root helper of the AtlasOS
+//! `telamon-wizard-helper`: the D-Bus activated root helper of Telamon OS
 //! Wizard. With the argument `apply-user-settings` (only ever started by the
 //! helper itself, as the new account) it writes that account's settings.
 
@@ -12,11 +12,11 @@ use wizard_helper::{apply, system_core};
 
 fn main() -> ExitCode {
     let app = app_info! {
-        name: "Atlas Wizard Helper",
-        id: "net.eterneon.atlas.wizard-helper",
+        name: "Telamon Wizard Helper",
+        id: "net.eterneon.telamon.wizard-helper",
         repo: "atlasos-wizard",
     };
-    // journal identifier: atlas-wizard-helper (stderr without a journal)
+    // journal identifier: telamon-wizard-helper (stderr without a journal)
     telamon_framework_core::log::init(&app);
 
     // No core dump, and no ptrace by the user's processes: the helper holds
@@ -39,7 +39,7 @@ fn main() -> ExitCode {
         [] => run_service(),
         ["apply-user-settings"] => ExitCode::from(u8::try_from(apply::run_child()).unwrap_or(1)),
         _ => {
-            eprintln!("usage: atlas-wizard-helper (started by D-Bus; no arguments)");
+            eprintln!("usage: telamon-wizard-helper (started by D-Bus; no arguments)");
             ExitCode::from(2)
         }
     }

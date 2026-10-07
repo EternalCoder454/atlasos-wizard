@@ -1,6 +1,6 @@
 [package]
 name = "wizard-core"
-description = "AtlasOS Wizard core: validation, installer.ini, state file, boot decisions, password hashing and quality"
+description = "Telamon Wizard core: validation, installer.ini, state file, boot decisions, password hashing and quality"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

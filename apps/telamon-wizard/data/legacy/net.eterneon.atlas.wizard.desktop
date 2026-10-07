@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+# The name this app had until 0.2.0 (Atlas Wizard's desktop file). Kept for
+# one release for what still launches it by that name, such as the image's
+# first-login autostart. It starts the same program. Drop it with
+# data/legacy when the image names net.eterneon.telamon.wizard.
+Name=Telamon Setup
+Comment=Set up Telamon OS: language, keyboard, network, time zone and your account
+Exec=telamon-wizard
+Icon=atlasos
+Terminal=false
+NoDisplay=true
+Categories=System;
+StartupNotify=false

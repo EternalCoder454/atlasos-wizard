@@ -1,4 +1,4 @@
-//! AtlasOS Wizard core: everything that decides or validates, with no Qt, no
+//! Telamon Wizard core: everything that decides or validates, with no Qt, no
 //! D-Bus and no async. The GUI, the root helper and the boot program all link
 //! it, so a rule lives in exactly one place.
 //!

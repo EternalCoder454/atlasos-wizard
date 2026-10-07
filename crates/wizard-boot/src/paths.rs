@@ -1,6 +1,6 @@
 //! Every path the program touches, under one root: `/` on a real system.
 //! A release build can only ever use `/`; a build with the `test-root`
-//! feature (tests only) takes the root from `ATLAS_WIZARD_TEST_ROOT`.
+//! feature (tests only) takes the root from `TELAMON_WIZARD_TEST_ROOT`.
 
 #[cfg(any(test, feature = "test-root"))]
 use std::path::Path;
@@ -8,7 +8,11 @@ use std::path::PathBuf;
 use wizard_core::state;
 
 /// The setup user's name.
-pub const SETUP_USER: &str = "atlas-setup";
+pub const SETUP_USER: &str = "telamon-setup";
+/// The setup user of Atlas Wizard (0.1.x). A machine set up by it still has the
+/// account (locked); a machine part way through setup may still have its
+/// autologin. The cleanup deals with both.
+pub const LEGACY_SETUP_USER: &str = "atlas-setup";
 
 /// Paths under a root directory.
 #[derive(Debug, Clone)]
@@ -20,7 +24,7 @@ impl Paths {
     /// The paths of the running system.
     pub fn system() -> Paths {
         #[cfg(feature = "test-root")]
-        if let Some(root) = std::env::var_os("ATLAS_WIZARD_TEST_ROOT") {
+        if let Some(root) = std::env::var_os("TELAMON_WIZARD_TEST_ROOT") {
             return Paths {
                 root: PathBuf::from(root),
             };
@@ -49,10 +53,17 @@ impl Paths {
 
     /// The setup autologin drop-in.
     pub fn dropin(&self) -> PathBuf {
+        self.join("etc/plasmalogin.conf.d/99-telamon-wizard.conf")
+    }
+
+    /// Atlas Wizard's setup autologin, `99-atlas-wizard.conf`: it names a user
+    /// and a session that no longer exist, so it is removed wherever it is
+    /// found.
+    pub fn legacy_dropin(&self) -> PathBuf {
         self.join("etc/plasmalogin.conf.d/99-atlas-wizard.conf")
     }
 
-    /// `/var/lib/atlas-wizard/state.json`.
+    /// `/var/lib/telamon-wizard/state.json`.
     pub fn state_file(&self) -> PathBuf {
         self.join(state::DEFAULT_PATH.trim_start_matches('/'))
     }
@@ -79,7 +90,7 @@ impl Paths {
 
     /// The setup user's home.
     pub fn setup_home(&self) -> PathBuf {
-        self.join("run/atlas-setup")
+        self.join("run/telamon-setup")
     }
 
     /// logind's per-user state file, present while the user has a session.

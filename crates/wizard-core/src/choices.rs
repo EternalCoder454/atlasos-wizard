@@ -4,7 +4,7 @@
 use std::borrow::Borrow;
 use std::collections::BTreeMap;
 
-/// Accent colours the GUI offers: AtlasOS violet first, then KDE's set.
+/// Accent colours the GUI offers: Telamon OS violet first, then KDE's set.
 pub const ACCENTS: [&str; 9] = [
     "#6858E2", "#E93A9A", "#E93D58", "#E9643A", "#E8CB2D", "#3DD425", "#00D3B8", "#1D99F3",
     "#9B59D0",
@@ -32,10 +32,10 @@ pub enum Value {
 /// Light or dark look.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Look {
-    /// AtlasOS Light.
+    /// Telamon OS Light.
     #[default]
     Light,
-    /// AtlasOS Dark.
+    /// Telamon OS Dark.
     Dark,
 }
 

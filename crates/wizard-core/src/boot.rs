@@ -8,24 +8,29 @@ use crate::state::{FINISH_MARKERS, Stage, State};
 /// The wizard is started at most this many boots before giving way.
 pub const MAX_BOOTS: u32 = 3;
 
-/// The kernel command line's `atlas.wizard=` value.
+/// The kernel command line's `telamon.wizard=` value (or `atlas.wizard=`,
+/// its name until 0.2.0, still read).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Cmdline {
     /// Not given, or a value we do not know.
     #[default]
     None,
-    /// `atlas.wizard=skip`
+    /// `telamon.wizard=skip`
     Skip,
-    /// `atlas.wizard=fallback`
+    /// `telamon.wizard=fallback`
     Fallback,
 }
 
 /// Parses `/proc/cmdline` text. Words are split on whitespace; the last
-/// `atlas.wizard=` wins; unknown values count as not given.
+/// `telamon.wizard=` or `atlas.wizard=` wins; unknown values count as not
+/// given.
 pub fn parse_cmdline(cmdline: &str) -> Cmdline {
     let mut out = Cmdline::None;
     for word in cmdline.split_whitespace() {
-        if let Some(v) = word.strip_prefix("atlas.wizard=") {
+        if let Some(v) = word
+            .strip_prefix("telamon.wizard=")
+            .or_else(|| word.strip_prefix("atlas.wizard="))
+        {
             out = match v {
                 "skip" => Cmdline::Skip,
                 "fallback" => Cmdline::Fallback,
@@ -41,7 +46,7 @@ pub fn parse_cmdline(cmdline: &str) -> Cmdline {
 pub struct BootInput {
     /// Which done markers exist.
     pub markers: Present,
-    /// The `atlas.wizard=` value.
+    /// The `telamon.wizard=` value.
     pub cmdline: Cmdline,
     /// Human accounts found in passwd and shadow.
     pub humans: Vec<Human>,
@@ -55,13 +60,13 @@ pub struct BootInput {
 /// What `prepare` does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BootAction {
-    /// Setup is done: remove the autologin drop-in, lock `atlas-setup`,
+    /// Setup is done: remove the autologin drop-in, lock `telamon-setup`,
     /// write the missing marker (when `write_missing_marker`).
     Cleanup {
-        /// Only one of the two markers exists.
+        /// A marker we write is missing (a machine Atlas Wizard set up lacks ours).
         write_missing_marker: bool,
     },
-    /// An account exists that the wizard did not make: write both markers,
+    /// An account exists that the wizard did not make: write the markers,
     /// then clean up.
     MarkDoneAndCleanup,
     /// Write the setup autologin; start the wizard.
@@ -112,10 +117,10 @@ pub fn decide(input: &BootInput) -> BootAction {
     // 1. a done marker
     if input.markers.any() {
         return BootAction::Cleanup {
-            write_missing_marker: !input.markers.both(),
+            write_missing_marker: !input.markers.all(),
         };
     }
-    // 2. atlas.wizard=skip and a usable human account
+    // 2. telamon.wizard=skip and a usable human account
     if input.cmdline == Cmdline::Skip && !input.humans.is_empty() {
         return BootAction::MarkDoneAndCleanup;
     }
@@ -207,13 +212,21 @@ mod tests {
     // Row 1
     #[test]
     fn row1_done_marker() {
-        for (atlas, plasma, missing) in [
-            (true, false, true),
-            (false, true, true),
-            (true, true, false),
+        for (telamon, atlas, plasma, missing) in [
+            (true, false, false, true),
+            (false, true, false, true),
+            (false, false, true, true),
+            // A machine set up by Atlas Wizard 0.1.x: ours is written.
+            (false, true, true, true),
+            (true, true, false, true),
+            (true, true, true, false),
         ] {
             let mut i = input(0, None, vec![]);
-            i.markers = Present { atlas, plasma };
+            i.markers = Present {
+                telamon,
+                atlas,
+                plasma,
+            };
             assert_eq!(
                 decide(&i),
                 BootAction::Cleanup {
@@ -229,6 +242,7 @@ mod tests {
         i.state.gave_up = true;
         i.cmdline = Cmdline::Fallback;
         i.markers = Present {
+            telamon: false,
             atlas: false,
             plasma: true,
         };
@@ -423,9 +437,24 @@ mod tests {
             parse_cmdline("BOOT_IMAGE=/vmlinuz root=/dev/sda quiet\n"),
             Cmdline::None
         );
+        assert_eq!(
+            parse_cmdline("quiet telamon.wizard=skip rhgb"),
+            Cmdline::Skip
+        );
+        assert_eq!(
+            parse_cmdline("telamon.wizard=fallback\n"),
+            Cmdline::Fallback
+        );
+        assert_eq!(parse_cmdline("telamon.wizard=other"), Cmdline::None);
+        // What it was called until 0.2.0.
         assert_eq!(parse_cmdline("quiet atlas.wizard=skip rhgb"), Cmdline::Skip);
         assert_eq!(parse_cmdline("atlas.wizard=fallback\n"), Cmdline::Fallback);
         assert_eq!(parse_cmdline("atlas.wizard=other"), Cmdline::None);
+        assert_eq!(
+            parse_cmdline("atlas.wizard=skip telamon.wizard=fallback"),
+            Cmdline::Fallback
+        );
+        assert_eq!(parse_cmdline("xtelamon.wizard=skip"), Cmdline::None);
         assert_eq!(
             parse_cmdline("atlas.wizard=skip atlas.wizard=fallback"),
             Cmdline::Fallback
