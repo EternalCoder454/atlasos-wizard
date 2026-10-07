@@ -1,0 +1,45 @@
+# name|step|actions|answers-json|env (VAR=value ... for screenshot.sh)
+# Actions: key:, type:, click:DX,DY (logical px from the screen centre), move:, sleep:
+welcome|welcome||
+welcome-on|welcome|click:350,-40 sleep:0.3 click:350,5 sleep:0.3|
+language|language||
+language-filtered|language|click:0,-204 type:deu sleep:0.5|
+language-none|language|click:0,-204 type:zzzz sleep:0.5|
+keyboard|keyboard||
+wifi|wifi||
+wifi-selected|wifi|click:-160,-38 sleep:0.5|
+wifi-open|wifi|click:-160,-100 sleep:0.5|
+wifi-wrong|wifi|click:-160,-38 click:0,202 type:wrong click:347,238 sleep:2.2|
+wifi-connected|wifi|click:-160,-38 click:0,202 type:secret click:347,238 sleep:2.4|
+wifi-hidden|wifi|click:-374,238 sleep:0.5|
+timezone|timezone||
+account|account||
+account-filled|account|click:2,-204 type:Ada~Lovelace key:Tab key:Tab type:correct-horse-battery-staple key:Tab key:Tab type:correct-horse-battery-staple sleep:0.8|
+account-weak|account|click:2,-204 type:Ada~Lovelace key:Tab key:Tab type:abc key:Tab key:Tab type:abd sleep:0.8|
+account-busy|account|click:2,-204 type:Ada~Lovelace key:Tab key:Tab type:correct-horse-battery-staple key:Tab key:Tab type:correct-horse-battery-staple sleep:0.8 click:346,283 sleep:0.8 now|
+account-error|account|click:2,-204 type:fail key:Tab key:Tab type:correct-horse-battery-staple key:Tab key:Tab type:correct-horse-battery-staple sleep:0.8 click:346,283 sleep:4.5|
+hostname|hostname||
+hostname-bad|hostname|click:2,-204 key:ctrl+a type:-Bad_name sleep:0.4|
+appearance|appearance||
+appearance-focus|appearance|key:Tab sleep:0.3|
+appearance-dark|appearance||{"look":"dark"}
+appearance-pink|appearance|key:Tab key:Tab key:Right sleep:0.3|{"accent":"#E93A9A"}
+privacy|privacy||
+privacy-on|privacy||{"crashReports":true}
+finish|finish||
+finish-working|finish|click:346,283 now|
+finish-done|finish|click:346,283 sleep:2|
+first-login|first-login||
+# Right-to-left (Arabic locale), a small laptop screen, and larger text.
+account-rtl|account|click:2,-204 type:Ada~Lovelace sleep:0.5||SHOT_LANG=ar_SA.UTF-8
+appearance-rtl|appearance|key:Tab sleep:0.3||SHOT_LANG=ar_SA.UTF-8
+wifi-rtl|wifi|click:-160,-38 sleep:0.5||SHOT_LANG=ar_SA.UTF-8
+small-welcome|welcome|||SHOT_SIZE=1366x768
+small-appearance|appearance|||SHOT_SIZE=1366x768
+text-account|account||{"textScale":1.5}|SHOT_SIZE=1366x768 SHOT_FONT_SCALE=1.5
+text-appearance|appearance||{"textScale":1.5}|SHOT_SIZE=1920x1080 SHOT_FONT_SCALE=1.5
+text-wifi|wifi||{"textScale":1.5}|SHOT_SIZE=1366x768 SHOT_FONT_SCALE=1.5
+# Behaviour checks: the first row of a list can be chosen, and Return goes on.
+wifi-first|wifi|click:-160,-146 sleep:0.5|
+language-first|language|click:0,-204 type:deu sleep:0.5 click:0,-146 sleep:0.5|
+hostname-enter|hostname|click:2,-204 key:ctrl+a type:mybox key:Return sleep:1.5|
