@@ -8,7 +8,6 @@ WizardPage {
     property string language
     signal chosen(string locale)
 
-    stepId: "language"
     title: qsTr("Language")
     subtitle: qsTr("Choose the language for menus and messages.")
     skippable: errorText !== ""
@@ -41,7 +40,11 @@ WizardPage {
                 page.errorText = page.errorFor(code);
                 return;
             }
-            const rows = JSON.parse(page.backend.languagesJson).map(c => ({ id: c, text: page._label(c), subtitle: c.split(".")[0] }));
+            const rows = JSON.parse(page.backend.languagesJson).map(c => ({
+                        id: c,
+                        text: page._label(c),
+                        subtitle: c.split(".")[0]
+                    }));
             rows.sort((a, b) => a.text.localeCompare(b.text));
             page.items = rows;
         }

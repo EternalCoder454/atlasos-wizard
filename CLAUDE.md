@@ -39,7 +39,8 @@ Updater's (`~/Documents/Projects/AtlasOS/Atlas Updater`,
   posted with `qt_thread().queue`.
 - **Telamon.Ui is the installed `telamon-ui` package.** Use its controls (never
   QQC2 or Kirigami buttons); what it lacks is asked of the framework. A local
-  stand-in is named `Wizard<Name>` so it never clashes (`check-app-names.sh`).
+  stand-in is named `Wizard<Name>` so it never clashes (`check-app-names.sh`);
+  DESIGN.md lists them and why each exists.
 - Commit only the paths you own (`git commit -- <paths>`), as
   `EternalHell <77252745+EternalCoder454@users.noreply.github.com>`. Don't
   push; the repository is not on GitHub yet.
@@ -59,6 +60,8 @@ Updater's (`~/Documents/Projects/AtlasOS/Atlas Updater`,
 | Tests | `scripts/dev.sh cargo test --workspace --locked` |
 | App build | `scripts/dev.sh bash -c 'cmake -S apps/telamon-wizard -B build/dev -G Ninja && cmake --build build/dev'` |
 | Smoke run | `scripts/dev.sh dbus-run-session -- env QT_QPA_PLATFORM=offscreen TELAMON_WIZARD_DEMO=1 build/dev/telamon-wizard` |
+| Screenshots | `scripts/dev.sh scripts/screenshots.sh out/shots` (every page and state, light and dark, 1x / 1.7x / 2x; states in `scripts/screenshot-states.txt`; one shot: `scripts/screenshot.sh`) |
+| Benchmark | `scripts/dev.sh scripts/bench.sh 7` (start-up, RSS / PSS, CPU; a release build: `-DCMAKE_BUILD_TYPE=Release`; `QT_QUICK_BACKEND=software` for no GL) |
 | Telamon checks | `<framework v2.0.0>/tools/lint-app.sh . && <framework v2.0.0>/tools/check-app-names.sh .` (read-only scripts; the dev image has the framework at `$TELAMON_FRAMEWORK`) |
 | RPM | `scripts/dev.sh packaging/build-rpm.sh /src/out` |
 

@@ -1,71 +1,152 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls as QQC2
 import QtQuick.Layouts
+import QtQuick.Templates as T
 import org.kde.kirigami as Kirigami
 import Telamon.Ui
 
-// Stand-in for TelamonChoiceCard (Telamon.Ui 1.5.0): a checkable AbstractButton
-// with a picture (`source`, or items declared inside as a preview), a label,
-// a check circle, a checked ring and a hover ring.
-QQC2.AbstractButton {
+// A choice shown as a picture with its name under it: TelamonChoiceCard's look
+// (a check circle beside the name, a ring in the accent colour around the
+// picture when chosen, a fainter one on hover and keyboard focus), but the
+// picture is whatever is declared inside, not an image file, so a preview can
+// be drawn with shapes. Stand-in until TelamonChoiceCard takes content. It is
+// a checkable button: put the cards in a ButtonGroup so choosing one clears
+// the others. A binding on `checked` survives the user's choice, as in
+// TelamonChoiceCard: the new value is held for one turn of the event loop.
+T.AbstractButton {
     id: control
 
-    property url source
     property real aspectRatio: 1.6
-    default property alias preview: previewHost.data
+    default property alias preview: frame.data
+
+    // The ring sits just outside the picture, inside the card's padding.
+    readonly property real _ring: TelamonStyle.spacingSmall
+    property bool _edit: false
+    property bool _editing: false
+    readonly property Binding _hold: Binding {
+        target: control
+        property: "checked"
+        value: control._edit
+        when: control._editing
+        restoreMode: Binding.RestoreBinding
+    }
+    function _release(): void {
+        control._editing = false;
+    }
+    onToggled: {
+        control._edit = control.checked;
+        control._editing = true;
+        Qt.callLater(control._release);
+    }
 
     checkable: true
-    padding: Kirigami.Units.smallSpacing
-    implicitWidth: Kirigami.Units.gridUnit * 13
-    implicitHeight: implicitWidth / aspectRatio + label.implicitHeight + Kirigami.Units.largeSpacing * 2
-    Accessible.role: Accessible.RadioButton
-    Accessible.name: text
-    Accessible.checked: checked
+    hoverEnabled: true
+    focusPolicy: Qt.StrongFocus
+    padding: control._ring
+    implicitWidth: Kirigami.Units.gridUnit * 17 + leftPadding + rightPadding
+    implicitHeight: column.implicitHeight + topPadding + bottomPadding
 
-    background: Rectangle {
-        radius: Kirigami.Units.cornerRadius
-        color: "transparent"
-        border.width: control.checked ? 3 : (control.hovered || control.visualFocus ? 2 : 1)
-        border.color: control.checked ? TelamonStyle.accent : (control.hovered || control.visualFocus ? Qt.alpha(TelamonStyle.accent, 0.5) : TelamonStyle.separator)
+    Accessible.role: Accessible.RadioButton
+    Accessible.name: control.text
+    Accessible.checkable: true
+    Accessible.checked: control.checked
+
+    background: Item {
+        TelamonFocusRing {
+            gap: 2
+            radius: TelamonStyle.radiusLarge + control._ring + gap
+            shown: control.visualFocus
+        }
     }
+
     contentItem: ColumnLayout {
-        spacing: Kirigami.Units.smallSpacing
+        id: column
+        spacing: TelamonStyle.spacing
+
         Item {
-            id: previewHost
             Layout.fillWidth: true
             Layout.preferredHeight: width / control.aspectRatio
-            clip: true
-            Image {
-                anchors.fill: parent
-                source: control.source
-                fillMode: Image.PreserveAspectCrop
-                visible: control.source.toString() !== ""
-            }
+
             Rectangle {
-                width: Kirigami.Units.gridUnit * 1.2
-                height: width
-                radius: width / 2
-                anchors.top: parent.top
-                anchors.right: parent.right
-                anchors.margins: Kirigami.Units.smallSpacing
-                color: control.checked ? TelamonStyle.accent : Qt.alpha(Kirigami.Theme.backgroundColor, 0.7)
-                border.width: 1
-                border.color: control.checked ? TelamonStyle.accent : TelamonStyle.separator
-                Kirigami.Icon {
-                    anchors.centerIn: parent
-                    width: parent.width * 0.7
-                    height: width
-                    source: "emblem-ok-symbolic"
-                    color: "white" // telamon-lint: allow-raw
-                    visible: control.checked
+                anchors.fill: parent
+                anchors.margins: -control._ring
+                radius: TelamonStyle.radiusLarge + control._ring
+                color: "transparent"
+                border.width: control.checked ? 3 : 2
+                border.color: control.checked ? TelamonStyle.accent : control.enabled && (control.hovered || control.visualFocus) ? (TelamonStyle.highContrast ? TelamonStyle.accent : TelamonStyle.alpha(TelamonStyle.accent, 0.45)) : "transparent"
+                Accessible.ignored: true
+                Behavior on border.color {
+                    ColorAnimation {
+                        duration: TelamonStyle.durationShort
+                    }
+                }
+                Behavior on border.width {
+                    enabled: !TelamonStyle.reducedMotion
+                    NumberAnimation {
+                        duration: TelamonStyle.durationShort
+                        easing.type: Easing.OutCubic
+                    }
                 }
             }
+            // The picture's own frame; the declared preview fills it.
+            Item {
+                id: frame
+                anchors.fill: parent
+                Accessible.ignored: true
+            }
+            // A hairline edge, so a light picture stands out from a light card.
+            Rectangle {
+                anchors.fill: parent
+                radius: TelamonStyle.radiusLarge
+                color: "transparent"
+                border.width: 1
+                border.color: TelamonStyle.highContrast ? TelamonStyle.controlBorder : TelamonStyle.alpha(TelamonStyle.text, 0.15)
+                Accessible.ignored: true
+            }
         }
-        TelamonLabel {
-            id: label
+
+        RowLayout {
             Layout.alignment: Qt.AlignHCenter
-            textStyle: TelamonLabel.Heading
-            text: control.text
+            Layout.topMargin: TelamonStyle.spacingSmall
+            spacing: TelamonStyle.spacing
+
+            // The check circle: filled with the accent colour when chosen.
+            Rectangle {
+                id: circle
+                implicitWidth: Math.round(Kirigami.Units.gridUnit * 0.9)
+                implicitHeight: implicitWidth
+                radius: width / 2
+                color: control.checked ? TelamonStyle.accent : "transparent"
+                border.width: control.checked ? 0 : 1
+                border.color: TelamonStyle.controlBorder
+                Accessible.ignored: true
+                Behavior on color {
+                    ColorAnimation {
+                        duration: TelamonStyle.durationShort
+                    }
+                }
+                Kirigami.Icon {
+                    anchors.centerIn: parent
+                    width: Math.round(circle.width * 0.75)
+                    height: width
+                    visible: control.checked
+                    source: "checkmark"
+                    isMask: true
+                    color: TelamonStyle.accentText
+                    Accessible.ignored: true
+                }
+            }
+            Text {
+                Layout.maximumWidth: Math.max(0, column.width - circle.width - TelamonStyle.spacing)
+                text: control.text
+                elide: Text.ElideRight
+                font.family: TelamonStyle.fontFamily
+                font.pointSize: TelamonStyle.fontSizeBody
+                font.weight: Font.DemiBold
+                color: control.enabled ? TelamonStyle.text : TelamonStyle.textDisabled
+                textFormat: Text.PlainText
+                Accessible.ignored: true
+            }
         }
     }
 }

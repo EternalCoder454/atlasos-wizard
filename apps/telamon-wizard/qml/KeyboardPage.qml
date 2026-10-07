@@ -10,7 +10,6 @@ WizardPage {
     property string variant
     signal chosen(string layout, string variant)
 
-    stepId: "keyboard"
     title: qsTr("Keyboard")
     subtitle: qsTr("Choose your keyboard layout.")
     skippable: errorText !== ""
@@ -44,7 +43,11 @@ WizardPage {
                 return;
             }
             page.layouts = JSON.parse(page.backend.layoutsJson);
-            page.items = page.layouts.map(l => ({ id: l.name, text: l.description, subtitle: l.name }));
+            page.items = page.layouts.map(l => ({
+                        id: l.name,
+                        text: l.description,
+                        subtitle: l.name
+                    }));
         }
     }
 
@@ -57,19 +60,27 @@ WizardPage {
         placeholder: qsTr("Search Layouts")
         onPicked: id => page.chosen(id, "")
     }
-    TelamonComboBox {
+    RowLayout {
         Layout.fillWidth: true
         visible: page.variants.length > 0
-        Accessible.name: qsTr("Variant")
-        model: [qsTr("Default")].concat(page.variants.map(v => v.description))
-        currentIndex: {
-            for (let i = 0; i < page.variants.length; ++i) {
-                if (page.variants[i].name === page.variant) {
-                    return i + 1;
-                }
-            }
-            return 0;
+        spacing: TelamonStyle.spacing
+        TelamonLabel {
+            text: qsTr("Variant")
         }
-        onActivated: i => page.chosen(page.layout, i === 0 ? "" : page.variants[i - 1].name)
+        TelamonComboBox {
+            id: variantBox
+            Layout.fillWidth: true
+            Accessible.name: qsTr("Variant")
+            model: [qsTr("Default")].concat(page.variants.map(v => v.description))
+            currentIndex: {
+                for (let i = 0; i < page.variants.length; ++i) {
+                    if (page.variants[i].name === page.variant) {
+                        return i + 1;
+                    }
+                }
+                return 0;
+            }
+            onActivated: i => page.chosen(page.layout, i === 0 ? "" : page.variants[i - 1].name)
+        }
     }
 }

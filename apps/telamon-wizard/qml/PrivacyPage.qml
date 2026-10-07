@@ -8,7 +8,6 @@ WizardPage {
     property bool crashReports: false
     signal toggled(bool on)
 
-    stepId: "privacy"
     title: qsTr("Privacy")
     subtitle: qsTr("Help improve Telamon OS, only if you want to.")
 

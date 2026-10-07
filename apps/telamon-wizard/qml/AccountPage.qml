@@ -21,7 +21,6 @@ WizardPage {
     readonly property bool confirmed: pass.text === confirm.text
     signal edited
 
-    stepId: "account"
     title: qsTr("Create Your Account")
     subtitle: qsTr("This account is the administrator of the computer.")
     canAdvance: checked && fullNameCode === "" && nameCode === "" && userName !== "" && passwordCode === "" && pass.text !== "" && confirmed
@@ -94,7 +93,7 @@ WizardPage {
             value: ""
         }
     }
-    WizardPasswordStrength {
+    TelamonPasswordStrength {
         Layout.fillWidth: true
         score: pass.text === "" ? -1 : page.score
     }
@@ -103,6 +102,8 @@ WizardPage {
         Layout.fillWidth: true
         placeholderText: qsTr("Confirm Password")
         errorText: text !== "" && !page.confirmed ? qsTr("The passwords don't match.") : ""
+        onAccepted: if (page.canAdvance)
+            page.submitted()
     }
     TelamonCheckBox {
         text: qsTr("Sign in automatically")
