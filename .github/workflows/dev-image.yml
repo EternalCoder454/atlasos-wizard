@@ -1,8 +1,8 @@
 name: Dev image
 
 # The image CI runs in, built from ci/Containerfile and published as
-# ghcr.io/eternalcoder454/atlas-wizard-dev:44 (public). Its label
-# net.eterneon.atlas.wizard.image-tag holds ci/image-tag.sh: a hash of the
+# ghcr.io/eternalcoder454/telamon-wizard-dev:44 (public). Its label
+# net.eterneon.telamon.wizard.image-tag holds ci/image-tag.sh: a hash of the
 # Containerfile, the spec's BuildRequires and the atlas-framework tag. The image
 # is out of date when that differs from this checkout's.
 #
@@ -22,7 +22,7 @@ on:
     paths:
       - ci/**
       - .containerignore
-      - packaging/atlas-wizard.spec
+      - packaging/telamon-wizard.spec
       - Cargo.toml
       - .github/workflows/dev-image.yml
   workflow_dispatch:
@@ -42,8 +42,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  IMAGE: ghcr.io/eternalcoder454/atlas-wizard-dev
-  LABEL: net.eterneon.atlas.wizard.image-tag
+  IMAGE: ghcr.io/eternalcoder454/telamon-wizard-dev
+  LABEL: net.eterneon.telamon.wizard.image-tag
 
 jobs:
   check:
@@ -102,7 +102,7 @@ jobs:
           FRAMEWORK: ${{ needs.check.outputs.framework }}
         run: |
           podman build -f ci/Containerfile --target ci \
-            --build-arg "ATLAS_FRAMEWORK_REF=$FRAMEWORK" \
+            --build-arg "TELAMON_FRAMEWORK_REF=$FRAMEWORK" \
             --build-arg "IMAGE_TAG=$WANT" \
             --label "org.opencontainers.image.revision=$GITHUB_SHA" \
             -t "$IMAGE:44" .
@@ -137,7 +137,7 @@ jobs:
           FRAMEWORK: ${{ needs.check.outputs.framework }}
         run: |
           podman build -f ci/Containerfile --target ci \
-            --build-arg "ATLAS_FRAMEWORK_REF=$FRAMEWORK" \
+            --build-arg "TELAMON_FRAMEWORK_REF=$FRAMEWORK" \
             --build-arg "IMAGE_TAG=$WANT" \
             -t "$IMAGE:44" .
           ci/check-image-secrets.sh "$IMAGE:44"

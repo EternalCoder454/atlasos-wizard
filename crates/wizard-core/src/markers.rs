@@ -9,14 +9,23 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-/// Atlas's marker, relative to the root.
+/// Telamon's marker, relative to the root.
+pub const TELAMON_MARKER: &str = "etc/telamon/setup-done";
+/// Atlas Wizard's marker (0.1.x), relative to the root: still written, because
+/// the image's health check (and an image that still has Atlas Wizard, after a
+/// rollback) read it, and still counts as done on a machine it was written on.
 pub const ATLAS_MARKER: &str = "etc/atlasos/setup-done";
 /// plasma-setup's marker, relative to the root.
 pub const PLASMA_MARKER: &str = "etc/plasma-setup-done";
 
 const MODE: u32 = 0o644;
 
-/// Absolute path of the Atlas marker under `root`.
+/// Absolute path of Telamon's marker under `root`.
+pub fn telamon_path(root: &Path) -> PathBuf {
+    root.join(TELAMON_MARKER)
+}
+
+/// Absolute path of Atlas Wizard's marker under `root`.
 pub fn atlas_path(root: &Path) -> PathBuf {
     root.join(ATLAS_MARKER)
 }
@@ -26,7 +35,7 @@ pub fn plasma_path(root: &Path) -> PathBuf {
     root.join(PLASMA_MARKER)
 }
 
-/// What `/etc/atlasos/setup-done` says.
+/// What `/etc/telamon/setup-done` (or `/etc/atlasos/setup-done`) says.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Marker {
     /// `Version`, when a number.
@@ -40,21 +49,23 @@ pub struct Marker {
 /// Which markers exist.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Present {
-    /// `/etc/atlasos/setup-done` exists.
+    /// `/etc/telamon/setup-done` exists.
+    pub telamon: bool,
+    /// `/etc/atlasos/setup-done` exists (Atlas Wizard's).
     pub atlas: bool,
     /// `/etc/plasma-setup-done` exists.
     pub plasma: bool,
 }
 
 impl Present {
-    /// True when either marker exists.
+    /// True when any marker exists: setup is done, whichever wizard did it.
     pub fn any(self) -> bool {
-        self.atlas || self.plasma
+        self.telamon || self.atlas || self.plasma
     }
 
-    /// True when both exist.
-    pub fn both(self) -> bool {
-        self.atlas && self.plasma
+    /// True when every marker we write exists.
+    pub fn all(self) -> bool {
+        self.telamon && self.atlas && self.plasma
     }
 }
 
@@ -72,12 +83,13 @@ fn there(path: &Path) -> bool {
 /// counts as there).
 pub fn present(root: &Path) -> Present {
     Present {
+        telamon: there(&telamon_path(root)),
         atlas: there(&atlas_path(root)),
         plasma: there(&plasma_path(root)),
     }
 }
 
-/// True when either marker exists, or cannot be checked: setup is done.
+/// True when any marker exists, or cannot be checked: setup is done.
 pub fn is_done(root: &Path) -> bool {
     present(root).any()
 }
@@ -87,17 +99,38 @@ pub fn is_done_or_unknown(root: &Path) -> bool {
     is_done(root)
 }
 
+fn setup_text(finished: &str) -> String {
+    format!(
+        "[Setup]\nVersion=1\nFinished={finished}\nWizard={}\n",
+        crate::VERSION
+    )
+}
+
+/// Writes (replaces) `/etc/telamon/setup-done`, atomically, mode 0644. On a
+/// machine Atlas Wizard set up, `Finished=` is the time its marker says.
+///
+/// # Errors
+/// Any I/O error.
+pub fn write_telamon(root: &Path, now: SystemTime) -> io::Result<()> {
+    let finished = read_atlas(root)
+        .ok()
+        .flatten()
+        .and_then(|m| m.finished)
+        .filter(|f| f.len() <= 64 && f.chars().all(|c| c.is_ascii_graphic()))
+        .unwrap_or_else(|| rfc3339_utc(now));
+    write_atomic(&telamon_path(root), setup_text(&finished).as_bytes(), MODE)
+}
+
 /// Writes (replaces) `/etc/atlasos/setup-done`, atomically, mode 0644.
 ///
 /// # Errors
 /// Any I/O error.
 pub fn write_atlas(root: &Path, now: SystemTime) -> io::Result<()> {
-    let text = format!(
-        "[Setup]\nVersion=1\nFinished={}\nWizard={}\n",
-        rfc3339_utc(now),
-        crate::VERSION
-    );
-    write_atomic(&atlas_path(root), text.as_bytes(), MODE)
+    write_atomic(
+        &atlas_path(root),
+        setup_text(&rfc3339_utc(now)).as_bytes(),
+        MODE,
+    )
 }
 
 /// Writes (replaces) `/etc/plasma-setup-done`, atomically, mode 0644.
@@ -105,17 +138,25 @@ pub fn write_atlas(root: &Path, now: SystemTime) -> io::Result<()> {
 /// # Errors
 /// Any I/O error.
 pub fn write_plasma(root: &Path, now: SystemTime) -> io::Result<()> {
-    let text = format!("Setup completed by atlas-wizard at {}\n", rfc3339_utc(now));
+    let text = format!(
+        "Setup completed by telamon-wizard at {}\n",
+        rfc3339_utc(now)
+    );
     write_atomic(&plasma_path(root), text.as_bytes(), MODE)
 }
 
 /// Writes whichever marker is missing and leaves an existing one alone, so a
-/// repeat after a crash is harmless. The Atlas marker is written first.
+/// repeat after a crash is harmless. Telamon's is written first; Atlas
+/// Wizard's and plasma-setup's follow (the image reads them until it moves to
+/// Telamon's).
 ///
 /// # Errors
 /// Any I/O error; a marker already written stays.
 pub fn write_missing(root: &Path, now: SystemTime) -> io::Result<()> {
     let p = present(root);
+    if !p.telamon {
+        write_telamon(root, now)?;
+    }
     if !p.atlas {
         write_atlas(root, now)?;
     }
@@ -125,12 +166,24 @@ pub fn write_missing(root: &Path, now: SystemTime) -> io::Result<()> {
     Ok(())
 }
 
+/// Reads `/etc/telamon/setup-done`. `Ok(None)` when it does not exist.
+///
+/// # Errors
+/// A read error, or text that is not UTF-8.
+pub fn read_telamon(root: &Path) -> io::Result<Option<Marker>> {
+    read_marker(&telamon_path(root))
+}
+
 /// Reads `/etc/atlasos/setup-done`. `Ok(None)` when it does not exist.
 ///
 /// # Errors
 /// A read error, or text that is not UTF-8.
 pub fn read_atlas(root: &Path) -> io::Result<Option<Marker>> {
-    let text = match fs::read_to_string(atlas_path(root)) {
+    read_marker(&atlas_path(root))
+}
+
+fn read_marker(path: &Path) -> io::Result<Option<Marker>> {
+    let text = match fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(e),
@@ -160,10 +213,78 @@ mod tests {
         assert!(!is_done(d.path()));
         assert_eq!(present(d.path()), Present::default());
         assert_eq!(read_atlas(d.path()).unwrap(), None);
+        assert_eq!(read_telamon(d.path()).unwrap(), None);
     }
 
     #[test]
-    fn atlas_marker_content_and_read_back() {
+    fn telamon_marker_content_and_read_back() {
+        let d = tempfile::tempdir().unwrap();
+        write_telamon(d.path(), t()).unwrap();
+        let text = fs::read_to_string(telamon_path(d.path())).unwrap();
+        assert_eq!(
+            text,
+            format!(
+                "[Setup]\nVersion=1\nFinished=2026-10-05T12:00:00Z\nWizard={}\n",
+                crate::VERSION
+            )
+        );
+        let m = read_telamon(d.path()).unwrap().unwrap();
+        assert_eq!(m.finished.as_deref(), Some("2026-10-05T12:00:00Z"));
+        assert!(is_done(d.path()));
+        assert_eq!(
+            present(d.path()),
+            Present {
+                telamon: true,
+                atlas: false,
+                plasma: false
+            }
+        );
+    }
+
+    /// A machine Atlas Wizard 0.1.x set up has /etc/atlasos/setup-done and
+    /// /etc/plasma-setup-done: it is done, and the first boot of this wizard
+    /// adds ours, with the time the machine was set up.
+    #[test]
+    fn a_machine_atlas_wizard_set_up_is_done_and_gets_ours() {
+        let d = tempfile::tempdir().unwrap();
+        fs::create_dir_all(d.path().join("etc/atlasos")).unwrap();
+        fs::write(
+            atlas_path(d.path()),
+            "[Setup]\nVersion=1\nFinished=2026-10-01T08:30:00Z\nWizard=0.1.1\n",
+        )
+        .unwrap();
+        write_plasma(d.path(), t()).unwrap();
+        assert!(is_done(d.path()) && is_done_or_unknown(d.path()));
+        assert!(!present(d.path()).telamon && !present(d.path()).all());
+        let old = fs::read(atlas_path(d.path())).unwrap();
+        write_missing(d.path(), t()).unwrap();
+        assert!(present(d.path()).all());
+        assert_eq!(
+            fs::read(atlas_path(d.path())).unwrap(),
+            old,
+            "theirs is left alone"
+        );
+        let m = read_telamon(d.path()).unwrap().unwrap();
+        assert_eq!(m.finished.as_deref(), Some("2026-10-01T08:30:00Z"));
+        assert_eq!(m.wizard.as_deref(), Some(crate::VERSION));
+    }
+
+    #[test]
+    fn a_finished_time_that_is_not_a_time_is_not_copied() {
+        let d = tempfile::tempdir().unwrap();
+        fs::create_dir_all(d.path().join("etc/atlasos")).unwrap();
+        fs::write(
+            atlas_path(d.path()),
+            "[Setup]\nFinished=x\u{7}\ny\nWizard=0.1.1\n",
+        )
+        .unwrap();
+        write_telamon(d.path(), t()).unwrap();
+        let m = read_telamon(d.path()).unwrap().unwrap();
+        assert_eq!(m.finished.as_deref(), Some("2026-10-05T12:00:00Z"));
+    }
+
+    #[test]
+    fn atlas_wizards_marker_content_and_read_back() {
         let d = tempfile::tempdir().unwrap();
         write_atlas(d.path(), t()).unwrap();
         let text = fs::read_to_string(atlas_path(d.path())).unwrap();
@@ -187,12 +308,13 @@ mod tests {
         write_plasma(d.path(), t()).unwrap();
         assert_eq!(
             fs::read_to_string(plasma_path(d.path())).unwrap(),
-            "Setup completed by atlas-wizard at 2026-10-05T12:00:00Z\n"
+            "Setup completed by telamon-wizard at 2026-10-05T12:00:00Z\n"
         );
         assert!(is_done(d.path()));
         assert_eq!(
             present(d.path()),
             Present {
+                telamon: false,
                 atlas: false,
                 plasma: true
             }
@@ -203,13 +325,21 @@ mod tests {
     fn modes_are_0644_and_no_temp_left() {
         let d = tempfile::tempdir().unwrap();
         write_missing(d.path(), t()).unwrap();
-        for p in [atlas_path(d.path()), plasma_path(d.path())] {
+        for p in [
+            telamon_path(d.path()),
+            atlas_path(d.path()),
+            plasma_path(d.path()),
+        ] {
             assert_eq!(
                 fs::metadata(&p).unwrap().permissions().mode() & 0o777,
                 0o644
             );
         }
-        for dir in [d.path().join("etc"), d.path().join("etc/atlasos")] {
+        for dir in [
+            d.path().join("etc"),
+            d.path().join("etc/telamon"),
+            d.path().join("etc/atlasos"),
+        ] {
             for e in fs::read_dir(dir).unwrap() {
                 assert!(!e.unwrap().file_name().to_string_lossy().contains(".tmp-"));
             }
@@ -223,19 +353,26 @@ mod tests {
         let before = fs::read(plasma_path(d.path())).unwrap();
         write_missing(d.path(), t() + Duration::from_secs(99)).unwrap();
         assert_eq!(fs::read(plasma_path(d.path())).unwrap(), before);
-        assert!(present(d.path()).both());
+        assert!(present(d.path()).all());
         write_missing(d.path(), t()).unwrap();
     }
 
     #[test]
     fn marker_that_cannot_be_checked_counts_as_there() {
         let d = tempfile::tempdir().unwrap();
-        // /etc/atlasos is a file: stat of etc/atlasos/setup-done fails with
+        // /etc/telamon is a file: stat of etc/telamon/setup-done fails with
         // ENOTDIR, not NotFound
+        fs::create_dir_all(d.path().join("etc")).unwrap();
+        fs::write(d.path().join("etc/telamon"), b"").unwrap();
+        let p = present(d.path());
+        assert!(p.telamon && !p.atlas && !p.plasma);
+        assert!(is_done(d.path()) && is_done_or_unknown(d.path()));
+        // and so is Atlas Wizard's
+        let d = tempfile::tempdir().unwrap();
         fs::create_dir_all(d.path().join("etc")).unwrap();
         fs::write(d.path().join("etc/atlasos"), b"").unwrap();
         let p = present(d.path());
-        assert!(p.atlas && !p.plasma);
+        assert!(!p.telamon && p.atlas && !p.plasma);
         assert!(is_done(d.path()) && is_done_or_unknown(d.path()));
     }
 
@@ -250,9 +387,9 @@ mod tests {
     #[test]
     fn failed_write_leaves_no_temp() {
         let d = tempfile::tempdir().unwrap();
-        fs::create_dir_all(atlas_path(d.path())).unwrap(); // a directory in the way
-        assert!(write_atlas(d.path(), t()).is_err());
-        let left: Vec<_> = fs::read_dir(d.path().join("etc/atlasos"))
+        fs::create_dir_all(telamon_path(d.path())).unwrap(); // a directory in the way
+        assert!(write_telamon(d.path(), t()).is_err());
+        let left: Vec<_> = fs::read_dir(d.path().join("etc/telamon"))
             .unwrap()
             .filter_map(Result::ok)
             .filter(|e| e.file_name().to_string_lossy().contains(".tmp-"))
@@ -263,9 +400,9 @@ mod tests {
     #[test]
     fn garbled_marker_reads_as_empty_fields() {
         let d = tempfile::tempdir().unwrap();
-        fs::create_dir_all(d.path().join("etc/atlasos")).unwrap();
-        fs::write(atlas_path(d.path()), "junk").unwrap();
-        let m = read_atlas(d.path()).unwrap().unwrap();
+        fs::create_dir_all(d.path().join("etc/telamon")).unwrap();
+        fs::write(telamon_path(d.path()), "junk").unwrap();
+        let m = read_telamon(d.path()).unwrap().unwrap();
         assert_eq!(
             m,
             Marker {

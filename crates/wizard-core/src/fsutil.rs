@@ -165,7 +165,7 @@ mod tests {
         let own = format!(".state.json.tmp-{}-0", std::process::id());
         for n in [
             ".state.json.tmp-123-4",
-            ".99-atlas-wizard.conf.tmp-7-0",
+            ".99-telamon-wizard.conf.tmp-7-0",
             &own,
             "state.json",
             ".hidden",

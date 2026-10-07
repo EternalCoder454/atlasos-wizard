@@ -132,7 +132,7 @@ fi
 # points of RUN --mount behind); anything else there fails: a file in them, or
 # a file or symlink in their place. Credential files fail by name anywhere.
 # Token shapes are looked for (binary files too) where a build writes, in
-# /atlas-rpms if a build leaves it behind, and in every file of the atlas-*
+# /telamon-rpms if a build leaves it behind, and in every file of the telamon-*
 # RPMs, the only packages not from Fedora, which must be installed. The
 # scanner first checks its tools and its pattern, so a broken tool cannot pass
 # in silence, and a grep error fails. File names only, never the matching
@@ -178,27 +178,27 @@ set +e
     [ -n "$(ls -A /root/.ssh 2>/dev/null)" ] && { echo "/root/.ssh is not empty"; rc=1; }
     dirs=()
     for d in /root /home /etc /opt /usr/local /tmp /var/tmp /var/lib /var/log \
-        /var/cache /srv /mnt /media /atlas-rpms; do
+        /var/cache /srv /mnt /media /telamon-rpms; do
         [ -e "$d" ] && dirs+=("$d")
     done
     found "build paths" -ra "${dirs[@]}"
-    if ! rpm -q atlas-ui atlas-symbols-fonts >/dev/null; then
-        echo "atlas-ui or atlas-symbols-fonts is not installed"; rc=1
+    if ! rpm -q telamon-ui telamon-symbols-fonts >/dev/null; then
+        echo "telamon-ui or telamon-symbols-fonts is not installed"; rc=1
     fi
-    if ! pkgs=$(rpm -qa --qf "%{NAME}\n" "atlas-*"); then
-        echo "cannot list the atlas-* packages"; rc=1
+    if ! pkgs=$(rpm -qa --qf "%{NAME}\n" "telamon-*"); then
+        echo "cannot list the telamon-* packages"; rc=1
     fi
     if [ -n "$pkgs" ]; then
         mapfile -t names <<<"$pkgs"
         if ! files=$(rpm -ql "${names[@]}"); then
-            echo "cannot list the atlas-* package files"; rc=1
+            echo "cannot list the telamon-* package files"; rc=1
         fi
         regular=()
         while IFS= read -r f; do
             [ -f "$f" ] && ! [ -L "$f" ] && regular+=("$f")
         done <<<"$files"
         # Binaries too (-a): these are libraries and fonts.
-        [ "${#regular[@]}" -gt 0 ] && found "atlas-* package files" -a "${regular[@]}"
+        [ "${#regular[@]}" -gt 0 ] && found "telamon-* package files" -a "${regular[@]}"
     fi
     exit $rc' _ "$tokens" 2>&1 |
     LC_ALL=C sed -e 's/[^[:print:]]/?/g' -e 's/::/: :/g' -e 's/##\[/# #[/g' >&2

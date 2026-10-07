@@ -1,6 +1,6 @@
 [package]
 name = "wizard-helper"
-description = "AtlasOS Wizard's root D-Bus helper: creates the first account and finishes setup"
+description = "Telamon Wizard's root D-Bus helper: creates the first account and finishes setup"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,7 +11,7 @@ rust-version.workspace = true
 name = "wizard_helper"
 
 [[bin]]
-name = "atlas-wizard-helper"
+name = "telamon-wizard-helper"
 path = "src/main.rs"
 
 [[test]]
@@ -22,13 +22,13 @@ path = "../../tests/helper/bus.rs"
 default = []
 # Test builds only (the crate lists itself under dev-dependencies, so
 # `cargo test` turns this on and a release build never does): the root of every
-# path, the setup user's name and the idle time come from ATLAS_WIZARD_TEST_*
+# path, the setup user's name and the idle time come from TELAMON_WIZARD_TEST_*
 # environment variables. Without it no such variable is ever read.
 test-root = []
 
 [dependencies]
-atlas-framework-core.workspace = true
-atlas-framework-system = { workspace = true, features = ["polkit"] }
+telamon-framework-core.workspace = true
+telamon-framework-system = { workspace = true, features = ["polkit"] }
 libc.workspace = true
 log.workspace = true
 rustix.workspace = true

@@ -1,0 +1,34 @@
+[package]
+name = "telamon-wizard"
+description = "Telamon Setup: the first-run wizard of Telamon OS (Kirigami UI over CXX-Qt)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+build = "build.rs"
+
+# CMake (Corrosion) links the static library into the C++ executable.
+# `rlib` is there so `cargo test` and `cargo clippy` work as usual.
+[lib]
+name = "telamon_wizard"
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+telamon-framework-ui.workspace = true
+wizard-core.workspace = true
+cxx = "1"
+cxx-qt = "0.10"
+cxx-qt-lib = "0.10"
+log = { version = "0.4", features = ["std"] }
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+zbus.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[build-dependencies]
+cxx-qt-build = "0.10"

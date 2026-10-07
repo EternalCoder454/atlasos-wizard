@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Telamon Setup
+Comment=First-run setup of Telamon OS
+Exec=/usr/libexec/telamon-wizard-session
+# Not in the session list; the setup autologin names it. (Not `Hidden=true`:
+# that disables the entry for autologin too.)
+NoDisplay=true
+DesktopNames=KDE

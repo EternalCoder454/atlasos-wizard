@@ -2,7 +2,7 @@
 //! `wizard_core::boot::decide` needs, decides, saves the new state, acts.
 //!
 //! It never fails the boot: a problem is logged and the boot goes on, because
-//! a failed `atlas-wizard-boot.service` must not keep the display manager (and
+//! a failed `telamon-wizard-boot.service` must not keep the display manager (and
 //! so a login screen) from starting.
 
 use crate::cmd::{Runner, run_logged};
@@ -18,14 +18,14 @@ use wizard_core::markers;
 use wizard_core::state::{self, Stage, State};
 
 /// The setup autologin, exactly as DESIGN.md gives it.
-pub const DROPIN: &str = "[Autologin]\nUser=atlas-setup\nSession=atlas-wizard\nRelogin=true\n";
+pub const DROPIN: &str = "[Autologin]\nUser=telamon-setup\nSession=telamon-wizard\nRelogin=true\n";
 const DROPIN_MODE: u32 = 0o644;
 
 /// The text-mode fallback, started without waiting (it is ordered after this
 /// unit, so waiting would never end).
 pub const SYSTEMCTL: &str = "/usr/bin/systemctl";
 /// The fallback's unit name.
-pub const FALLBACK_UNIT: &str = "atlas-wizard-fallback.service";
+pub const FALLBACK_UNIT: &str = "telamon-wizard-fallback.service";
 
 /// What `prepare` found that makes a decision impossible.
 #[derive(Debug)]
@@ -161,7 +161,7 @@ fn act(paths: &Paths, run: &dyn Runner, action: BootAction) -> &'static str {
         BootAction::RunWizard {
             resume_after_account,
         } => {
-            // The setup autologin fails at PAM for a locked `atlas-setup`.
+            // The setup autologin fails at PAM for a locked `telamon-setup`.
             lock::unlock_setup_user(paths, run);
             match write_dropin(paths) {
                 Ok(()) => {
@@ -240,12 +240,12 @@ mod tests {
         fs::create_dir_all(t.path().join("etc")).unwrap();
         fs::write(
             p.passwd(),
-            "root:x:0:0::/root:/bin/bash\natlas-setup:x:975:975::/run/atlas-setup:/bin/sh\n",
+            "root:x:0:0::/root:/bin/bash\ntelamon-setup:x:975:975::/run/telamon-setup:/bin/sh\n",
         )
         .unwrap();
         fs::write(
             p.shadow(),
-            "root:!:1:::::::\natlas-setup:!*:19000:0:99999:7:::\n",
+            "root:!:1:::::::\ntelamon-setup:!*:19000:0:99999:7:::\n",
         )
         .unwrap();
         (t, p)
@@ -287,7 +287,7 @@ mod tests {
         assert!(!p.dropin().exists());
         assert_eq!(
             f.calls(),
-            ["/usr/bin/systemctl start --no-block atlas-wizard-fallback.service"]
+            ["/usr/bin/systemctl start --no-block telamon-wizard-fallback.service"]
         );
     }
 

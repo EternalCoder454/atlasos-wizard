@@ -1,6 +1,6 @@
 [package]
 name = "wizard-boot"
-description = "AtlasOS Wizard boot program: prepare (every boot, before the display manager) and the text-mode fallback"
+description = "Telamon Wizard boot program: prepare (every boot, before the display manager) and the text-mode fallback"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,10 +11,10 @@ rust-version.workspace = true
 name = "wizard_boot"
 
 [[bin]]
-name = "atlas-wizard-boot"
+name = "telamon-wizard-boot"
 path = "src/main.rs"
 
-# Tests only: `Paths` takes its root from ATLAS_WIZARD_TEST_ROOT and every
+# Tests only: `Paths` takes its root from TELAMON_WIZARD_TEST_ROOT and every
 # external command goes to a fake that edits files under that root. Never in a
 # release build: the self dev-dependency below turns it on for `cargo test`
 # only.
@@ -22,7 +22,7 @@ path = "src/main.rs"
 test-root = []
 
 [dependencies]
-atlas-framework-core.workspace = true
+telamon-framework-core.workspace = true
 libc.workspace = true
 log.workspace = true
 rustix = { workspace = true, features = ["termios", "stdio", "event"] }

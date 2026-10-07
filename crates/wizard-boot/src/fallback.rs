@@ -428,12 +428,12 @@ mod tests {
         fs::create_dir_all(t.path().join("etc")).unwrap();
         fs::write(
             p.passwd(),
-            "root:x:0:0::/root:/bin/bash\natlas-setup:x:975:975::/run/atlas-setup:/bin/sh\n",
+            "root:x:0:0::/root:/bin/bash\ntelamon-setup:x:975:975::/run/telamon-setup:/bin/sh\n",
         )
         .unwrap();
         fs::write(
             p.shadow(),
-            "root:!:1:::::::\natlas-setup:!*:19000:0:99999:7:::\n",
+            "root:!:1:::::::\ntelamon-setup:!*:19000:0:99999:7:::\n",
         )
         .unwrap();
         fs::write(p.group(), "root:x:0:\nwheel:x:10:\n").unwrap();
@@ -476,7 +476,7 @@ mod tests {
         let stdin = fs::read_to_string(p.root().join("chpasswd.stdin")).unwrap();
         assert!(stdin.starts_with("ada:$y$"), "{stdin}");
         assert!(!stdin.contains(GOOD));
-        assert!(markers::present(p.root()).both());
+        assert!(markers::present(p.root()).all());
         let s = state::load(&p.state_file()).unwrap().state;
         assert_eq!(s.account.unwrap().stage, Stage::Verified);
         assert_eq!(s.finish.as_deref(), Some("markers"));
@@ -569,12 +569,13 @@ mod tests {
         // The helper made it and gave up afterwards.
         let mut pre = Script::new(vec![line("Ada"), line("ada"), line(GOOD), line(GOOD)]);
         assert_eq!(run(&p, &f, &mut pre), Outcome::Done);
+        fs::remove_file(markers::telamon_path(p.root())).unwrap();
         fs::remove_file(markers::atlas_path(p.root())).unwrap();
         fs::remove_file(markers::plasma_path(p.root())).unwrap();
         let mut c = Script::new(vec![]);
         assert_eq!(run(&p, &f, &mut c), Outcome::Done);
         assert!(c.prompts.is_empty());
-        assert!(markers::present(p.root()).both());
+        assert!(markers::present(p.root()).all());
     }
 
     fn verified_ada(p: &Paths) {
@@ -613,7 +614,7 @@ mod tests {
         let mut c = Script::new(vec![]);
         assert_eq!(run(&p, &f, &mut c), Outcome::Done);
         assert!(c.prompts.is_empty(), "never asks for a second account");
-        assert!(markers::present(p.root()).both());
+        assert!(markers::present(p.root()).all());
         assert!(dm_started(&f));
     }
 
@@ -629,7 +630,7 @@ mod tests {
         assert_eq!(run(&p, &f, &mut c), Outcome::Done);
         assert!(!c.prompts.is_empty(), "asks: no human account exists");
         assert!(fs::read_to_string(p.passwd()).unwrap().contains("ada:"));
-        assert!(markers::present(p.root()).both());
+        assert!(markers::present(p.root()).all());
         assert!(dm_started(&f));
     }
 
@@ -643,7 +644,7 @@ mod tests {
         let mut c = Script::new(vec![]);
         assert_eq!(run(&p, &f, &mut c), Outcome::Done);
         assert!(c.prompts.is_empty());
-        assert!(markers::present(p.root()).both());
+        assert!(markers::present(p.root()).all());
         assert!(dm_started(&f));
     }
 

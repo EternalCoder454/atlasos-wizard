@@ -5,7 +5,7 @@
 //!
 //! Nothing here touches the real system: every path is under the temp root and
 //! every bus is private. The tests skip (with a message) when dbus-daemon or
-//! python-dbusmock is missing; set ATLAS_WIZARD_REQUIRE_BUS_TESTS=1 to make
+//! python-dbusmock is missing; set TELAMON_WIZARD_REQUIRE_BUS_TESTS=1 to make
 //! that a failure instead.
 
 use std::collections::HashMap;
@@ -18,10 +18,10 @@ use std::time::{Duration, Instant};
 
 use zbus::zvariant::{Dict, Value};
 
-const BUS_NAME: &str = "net.eterneon.atlas.WizardHelper";
-const OBJECT: &str = "/net/eterneon/atlas/WizardHelper";
-const IFACE: &str = "net.eterneon.atlas.WizardHelper1";
-const ERR: &str = "net.eterneon.atlas.Error";
+const BUS_NAME: &str = "net.eterneon.telamon.WizardHelper";
+const OBJECT: &str = "/net/eterneon/telamon/WizardHelper";
+const IFACE: &str = "net.eterneon.telamon.WizardHelper1";
+const ERR: &str = "net.eterneon.telamon.Error";
 const PW: &str = "violet-Plum-Orbit-4711";
 
 fn me() -> u32 {
@@ -51,7 +51,7 @@ struct Opts {
     setup_uid: u32,
     idle_ms: u64,
     /// `Some(true)`: the test bus enforces the shipped bus policy with the
-    /// current user standing in for `atlas-setup`; `Some(false)`: with
+    /// current user standing in for `telamon-setup`; `Some(false)`: with
     /// somebody else standing in (and root's rule moved off us), so sending
     /// is denied. `None`: everything may send.
     shipped_policy: Option<bool>,
@@ -61,9 +61,9 @@ impl Default for Opts {
     fn default() -> Self {
         Opts {
             allowed: vec![
-                "net.eterneon.atlas.wizard.create-account",
-                "net.eterneon.atlas.wizard.finish",
-                "net.eterneon.atlas.wizard.fallback",
+                "net.eterneon.telamon.wizard.create-account",
+                "net.eterneon.telamon.wizard.finish",
+                "net.eterneon.telamon.wizard.fallback",
             ],
             setup_uid: me(),
             idle_ms: 120_000,
@@ -91,7 +91,7 @@ impl Drop for World {
 }
 
 /// The shipped bus policy's `<policy>` blocks, with the user names swapped for
-/// ones the test bus can tell apart: `atlas-setup` becomes this user (or
+/// ones the test bus can tell apart: `telamon-setup` becomes this user (or
 /// `nobody`) and `root` becomes `nobody`, so root running the tests gets no
 /// special pass.
 fn shipped_policy_rules(allow_me: Option<bool>) -> String {
@@ -106,7 +106,7 @@ fn shipped_policy_rules(allow_me: Option<bool>) -> String {
     );
     let text = fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../data/dbus-1/system.d/net.eterneon.atlas.WizardHelper.conf"),
+            .join("../../data/dbus-1/system.d/net.eterneon.telamon.WizardHelper.conf"),
     )
     .unwrap();
     let body = text
@@ -114,13 +114,13 @@ fn shipped_policy_rules(allow_me: Option<bool>) -> String {
         .and_then(|(_, rest)| rest.rsplit_once("</busconfig>"))
         .expect("a busconfig")
         .0;
-    assert!(body.contains("user=\"atlas-setup\"") && body.contains("user=\"root\""));
+    assert!(body.contains("user=\"telamon-setup\"") && body.contains("user=\"root\""));
     assert!(
         !body.contains("context=\"default\""),
         "the default must stay deny"
     );
     body.replace("user=\"root\"", "user=\"nobody\"").replace(
-        "user=\"atlas-setup\"",
+        "user=\"telamon-setup\"",
         &format!("user=\"{}\"", if allow_me { me } else { "nobody" }),
     )
 }
@@ -142,11 +142,11 @@ fn write_tool(root: &Path, log: &Path, rel: &str) {
     // like the real commands, the lock tools change the temp root's files
     let effect = match rel.rsplit('/').next() {
         Some("chage") => format!(
-            "[ \"$1\" = -E ] && sed -i \"s/^\\(atlas-setup:\\([^:]*:\\)\\{{6\\}}\\)[^:]*/\\1$2/\" '{}'\n",
+            "[ \"$1\" = -E ] && sed -i \"s/^\\(telamon-setup:\\([^:]*:\\)\\{{6\\}}\\)[^:]*/\\1$2/\" '{}'\n",
             root.join("etc/shadow").display()
         ),
         Some("usermod") => format!(
-            "[ \"$1\" = -s ] && sed -i \"s|^\\(atlas-setup:\\([^:]*:\\)\\{{5\\}}\\)[^:]*|\\1$2|\" '{}'\n",
+            "[ \"$1\" = -s ] && sed -i \"s|^\\(telamon-setup:\\([^:]*:\\)\\{{5\\}}\\)[^:]*|\\1$2|\" '{}'\n",
             root.join("etc/passwd").display()
         ),
         _ => String::new(),
@@ -158,10 +158,11 @@ fn write_tool(root: &Path, log: &Path, rel: &str) {
 fn fixture(root: &Path, setup_uid: u32) -> PathBuf {
     for d in [
         "etc/skel",
+        "etc/telamon",
         "etc/atlasos",
         "etc/xdg",
         "etc/plasmalogin.conf.d",
-        "var/lib/atlas-wizard",
+        "var/lib/telamon-wizard",
         "usr/bin",
         "usr/sbin",
         "usr/share/color-schemes",
@@ -174,23 +175,23 @@ fn fixture(root: &Path, setup_uid: u32) -> PathBuf {
     fs::write(
         root.join("etc/passwd"),
         format!(
-            "root:x:0:0:root:/root:/bin/bash\natlas-setup:x:{setup_uid}:970:AtlasOS Setup:/run/atlas-setup:/bin/sh\n"
+            "root:x:0:0:root:/root:/bin/bash\ntelamon-setup:x:{setup_uid}:970:Telamon Setup:/run/telamon-setup:/bin/sh\n"
         ),
     )
     .unwrap();
     fs::write(
         root.join("etc/shadow"),
-        "root:!:19000::::::\natlas-setup:!*:19000::::::\n",
+        "root:!:19000::::::\ntelamon-setup:!*:19000::::::\n",
     )
     .unwrap();
     fs::write(
         root.join("etc/group"),
-        "root:x:0:\nwheel:x:10:\natlas-setup:x:970:\n",
+        "root:x:0:\nwheel:x:10:\ntelamon-setup:x:970:\n",
     )
     .unwrap();
     fs::write(
-        root.join("etc/plasmalogin.conf.d/99-atlas-wizard.conf"),
-        "[Autologin]\nUser=atlas-setup\nSession=atlas-wizard\nRelogin=true\n",
+        root.join("etc/plasmalogin.conf.d/99-telamon-wizard.conf"),
+        "[Autologin]\nUser=telamon-setup\nSession=telamon-wizard\nRelogin=true\n",
     )
     .unwrap();
     fs::write(
@@ -267,7 +268,7 @@ impl World {
     async fn new(o: Opts) -> Option<World> {
         if !tools_available() {
             assert!(
-                std::env::var_os("ATLAS_WIZARD_REQUIRE_BUS_TESTS").is_none(),
+                std::env::var_os("TELAMON_WIZARD_REQUIRE_BUS_TESTS").is_none(),
                 "dbus-daemon or python-dbusmock is missing"
             );
             eprintln!("SKIP: dbus-daemon or python-dbusmock is not installed");
@@ -292,7 +293,7 @@ impl World {
                 sock.display(),
                 // the default of the real system bus for our name is deny
                 if o.shipped_policy.is_some() {
-                    "<deny send_destination=\"net.eterneon.atlas.WizardHelper\"/>"
+                    "<deny send_destination=\"net.eterneon.telamon.WizardHelper\"/>"
                 } else {
                     ""
                 },
@@ -380,11 +381,11 @@ impl World {
         w.set_allowed(&o.allowed).await;
 
         let helper = spawn_logged(
-            Command::new(env!("CARGO_BIN_EXE_atlas-wizard-helper"))
+            Command::new(env!("CARGO_BIN_EXE_telamon-wizard-helper"))
                 .env_clear()
                 .env("DBUS_SYSTEM_BUS_ADDRESS", &addr)
-                .env("ATLAS_WIZARD_TEST_ROOT", &w.root)
-                .env("ATLAS_WIZARD_TEST_IDLE_MS", o.idle_ms.to_string()),
+                .env("TELAMON_WIZARD_TEST_ROOT", &w.root)
+                .env("TELAMON_WIZARD_TEST_IDLE_MS", o.idle_ms.to_string()),
             &w.helper_log,
         );
         w.helper = Some(helper);
@@ -504,7 +505,7 @@ impl World {
     }
 
     fn state(&self) -> serde_json::Value {
-        let t = fs::read_to_string(self.root.join("var/lib/atlas-wizard/state.json")).unwrap();
+        let t = fs::read_to_string(self.root.join("var/lib/telamon-wizard/state.json")).unwrap();
         serde_json::from_str(&t).unwrap()
     }
 
@@ -615,12 +616,18 @@ async fn full_flow_create_finish_end() {
             && kxkb.contains("Use=true"),
         "{kxkb}"
     );
-    let crash = fs::read_to_string(home.join(".config/atlas/crash-reporting.toml")).unwrap();
+    let crash = fs::read_to_string(home.join(".config/telamon/crash-reporting.toml")).unwrap();
     assert!(crash.contains("enabled = true"), "{crash}");
+    // Atlas.Ui 1.x apps read the choice from where they always did.
+    assert_eq!(
+        fs::read_to_string(home.join(".config/atlas/crash-reporting.toml")).unwrap(),
+        crash
+    );
     for f in [
         ".config/kdeglobals",
         ".config/kaccessrc",
         ".config/kxkbrc",
+        ".config/telamon/crash-reporting.toml",
         ".config/atlas/crash-reporting.toml",
     ] {
         assert_eq!(
@@ -639,7 +646,7 @@ async fn full_flow_create_finish_end() {
             .to_string()
     };
     let l = tool("plasma-apply-lookandfeel");
-    assert!(l.contains("|--apply org.atlasos.dark.desktop|"), "{l}");
+    assert!(l.contains("|--apply org.telamon.dark.desktop|"), "{l}");
     let a = tool("plasma-apply-colorscheme");
     assert!(a.contains("|--accent-color #E93A9A|"), "{a}");
     for line in [&l, &a] {
@@ -659,7 +666,7 @@ async fn full_flow_create_finish_end() {
         let mut keys = keys;
         keys.sort_unstable();
         let mut want = vec![
-            "ATLAS_WIZARD_TEST_ROOT",
+            "TELAMON_WIZARD_TEST_ROOT",
             "HOME",
             "LOGNAME",
             "PATH",
@@ -682,25 +689,26 @@ async fn full_flow_create_finish_end() {
     }
     // and the lock commands, as root
     let c = tool("chage");
-    assert!(c.contains("|-E 0 atlas-setup|uid=0|"), "{c}");
+    assert!(c.contains("|-E 0 telamon-setup|uid=0|"), "{c}");
     let u = tool("usermod");
     assert!(
-        u.contains("|-s /usr/sbin/nologin atlas-setup|uid=0|"),
+        u.contains("|-s /usr/sbin/nologin telamon-setup|uid=0|"),
         "{u}"
     );
 
     // drop-ins and markers
     let dropin = fs::read_to_string(
         w.root
-            .join("etc/plasmalogin.conf.d/50-atlas-autologin.conf"),
+            .join("etc/plasmalogin.conf.d/50-telamon-autologin.conf"),
     )
     .unwrap();
     assert_eq!(dropin, "[Autologin]\nUser=ada\nSession=plasma\n");
     assert!(
         !w.root
-            .join("etc/plasmalogin.conf.d/99-atlas-wizard.conf")
+            .join("etc/plasmalogin.conf.d/99-telamon-wizard.conf")
             .exists()
     );
+    assert!(w.root.join("etc/telamon/setup-done").exists());
     assert!(w.root.join("etc/atlasos/setup-done").exists());
     assert!(w.root.join("etc/plasma-setup-done").exists());
     assert_eq!(w.state()["finish"], "done");
@@ -756,10 +764,10 @@ async fn without_polkit_nothing_is_allowed() {
     assert!(err_name(&e, "NotAuthorized"), "{e:?}");
     assert!(w.accounts_log().await.is_empty());
     assert!(w.systemd_log().await.is_empty());
-    assert!(!w.root.join("var/lib/atlas-wizard/state.json").exists());
+    assert!(!w.root.join("var/lib/telamon-wizard/state.json").exists());
     assert!(
         w.root
-            .join("etc/plasmalogin.conf.d/99-atlas-wizard.conf")
+            .join("etc/plasmalogin.conf.d/99-telamon-wizard.conf")
             .exists()
     );
 }
@@ -767,7 +775,7 @@ async fn without_polkit_nothing_is_allowed() {
 #[tokio::test]
 async fn only_the_action_polkit_allows_is_allowed() {
     let Some(w) = World::new(Opts {
-        allowed: vec!["net.eterneon.atlas.wizard.fallback"],
+        allowed: vec!["net.eterneon.telamon.wizard.fallback"],
         ..Opts::default()
     })
     .await
@@ -836,7 +844,7 @@ async fn bad_input_never_reaches_accountsservice() {
         .unwrap_err();
     assert!(err_name(&e, "Invalid"), "{e:?}");
     assert!(w.accounts_log().await.is_empty());
-    assert!(!w.root.join("var/lib/atlas-wizard/state.json").exists());
+    assert!(!w.root.join("var/lib/telamon-wizard/state.json").exists());
 
     // Finish: nothing to finish, then bad choices
     let e = w.finish(HashMap::new()).await.unwrap_err();
@@ -854,6 +862,7 @@ async fn bad_input_never_reaches_accountsservice() {
         let e = w.finish(c).await.unwrap_err();
         assert!(err_name(&e, "Invalid"), "{k}: {e:?}");
     }
+    assert!(!w.root.join("etc/telamon/setup-done").exists());
     assert!(!w.root.join("etc/atlasos/setup-done").exists());
     assert!(
         !w.tools_log().contains("TOOL"),
@@ -952,12 +961,12 @@ async fn give_up_hands_over_to_the_fallback() {
     assert_eq!(w.state()["gave_up"], true);
     assert!(
         !w.root
-            .join("etc/plasmalogin.conf.d/99-atlas-wizard.conf")
+            .join("etc/plasmalogin.conf.d/99-telamon-wizard.conf")
             .exists()
     );
     assert_eq!(
         w.systemd_log().await,
-        vec!["StartUnit atlas-wizard-fallback.service replace".to_string()]
+        vec!["StartUnit telamon-wizard-fallback.service replace".to_string()]
     );
 }
 
@@ -990,7 +999,7 @@ async fn the_helper_exits_when_idle_and_releases_its_name() {
 
 #[tokio::test]
 async fn the_shipped_bus_policy_lets_only_the_setup_user_send() {
-    // allowed: the user standing in for atlas-setup reaches the helper
+    // allowed: the user standing in for telamon-setup reaches the helper
     let Some(w) = World::new(Opts {
         shipped_policy: Some(true),
         ..Opts::default()
@@ -1017,7 +1026,7 @@ async fn the_shipped_bus_policy_lets_only_the_setup_user_send() {
         "the bus should refuse the call: {e:?}"
     );
     assert!(w.systemd_log().await.is_empty());
-    assert!(!w.root.join("var/lib/atlas-wizard/state.json").exists());
+    assert!(!w.root.join("var/lib/telamon-wizard/state.json").exists());
 }
 
 #[tokio::test]

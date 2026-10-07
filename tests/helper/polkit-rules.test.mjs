@@ -1,4 +1,4 @@
-// Tests data/polkit-1/rules.d/50-atlas-wizard.rules with a stub `polkit`.
+// Tests data/polkit-1/rules.d/50-telamon-wizard.rules with a stub `polkit`.
 // Run: node --test tests/helper/polkit-rules.test.mjs   (or: node <file>)
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -9,13 +9,13 @@ import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const source = fs.readFileSync(
-  path.join(here, "../../data/polkit-1/rules.d/50-atlas-wizard.rules"),
+  path.join(here, "../../data/polkit-1/rules.d/50-telamon-wizard.rules"),
   "utf8",
 );
 
 const YES = "yes";
 const NO = "no";
-const FINISH = "net.eterneon.atlas.wizard.finish";
+const FINISH = "net.eterneon.telamon.wizard.finish";
 
 // `markers`: paths that exist. `spawnBroken`: spawn cannot run at all.
 // `noParent`: parent directories that do not exist (or cannot be checked).
@@ -52,7 +52,7 @@ function load({ markers = [], spawnBroken = false, noParent = [] } = {}) {
   return { rule, calls };
 }
 
-const setup = { user: "atlas-setup", local: true, active: true };
+const setup = { user: "telamon-setup", local: true, active: true };
 const granted = [...source.matchAll(/^\s*"([a-zA-Z0-9.\-]+\.[a-zA-Z0-9.\-]+)"/gm)]
   .map((m) => m[1])
   .filter((id) => /^(net\.eterneon|org\.freedesktop)\./.test(id));
@@ -68,7 +68,12 @@ test("no marker: the setup user is granted every listed action", () => {
 });
 
 test("any marker: NO for every listed action but the helper's finish", () => {
-  for (const marker of ["/etc/atlasos/setup-done", "/etc/plasma-setup-done"]) {
+  // ours, Atlas Wizard's (a machine it set up) and plasma-setup's
+  for (const marker of [
+    "/etc/telamon/setup-done",
+    "/etc/atlasos/setup-done",
+    "/etc/plasma-setup-done",
+  ]) {
     const { rule } = load({ markers: [marker] });
     for (const id of granted.filter((g) => g !== FINISH)) {
       assert.equal(rule({ id }, setup), NO, `${id} with ${marker}`);
@@ -78,9 +83,13 @@ test("any marker: NO for every listed action but the helper's finish", () => {
   }
 });
 
-test("both markers present: NO as well", () => {
+test("all markers present: NO as well", () => {
   const { rule } = load({
-    markers: ["/etc/atlasos/setup-done", "/etc/plasma-setup-done"],
+    markers: [
+      "/etc/telamon/setup-done",
+      "/etc/atlasos/setup-done",
+      "/etc/plasma-setup-done",
+    ],
   });
   for (const id of granted.filter((g) => g !== FINISH)) {
     assert.equal(rule({ id }, setup), NO, id);
@@ -95,7 +104,7 @@ test("a broken spawn fails closed", () => {
 });
 
 test("a missing or unreadable parent directory is NO, not 'no marker'", () => {
-  for (const parent of ["/etc/atlasos", "/etc"]) {
+  for (const parent of ["/etc/telamon", "/etc/atlasos", "/etc"]) {
     const { rule, calls } = load({ noParent: [parent] });
     for (const id of granted.filter((g) => g !== FINISH)) {
       assert.equal(rule({ id }, setup), NO, id + " " + parent);
@@ -110,6 +119,7 @@ test("each marker is tested with its own parent directory", () => {
   assert.deepEqual(
     calls.map((c) => [c[2], c[5], c[9]]),
     [
+      ["/etc/telamon", "/etc/telamon", "/etc/telamon/setup-done"],
       ["/etc/atlasos", "/etc/atlasos", "/etc/atlasos/setup-done"],
       ["/etc", "/etc", "/etc/plasma-setup-done"],
     ],
@@ -123,5 +133,7 @@ test("other users, remote or inactive sessions, other actions: not handled", () 
   assert.equal(rule({ id }, { ...setup, local: false }), undefined);
   assert.equal(rule({ id }, { ...setup, active: false }), undefined);
   assert.equal(rule({ id: "org.freedesktop.login1.reboot" }, setup), undefined);
+  // Atlas Wizard's setup user is not granted anything by this rule
+  assert.equal(rule({ id }, { ...setup, user: "atlas-setup" }), undefined);
   assert.equal(calls.length, 0, "no process is spawned for those");
 });

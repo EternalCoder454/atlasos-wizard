@@ -1,4 +1,4 @@
-//! `/var/lib/atlas-wizard/state.json` (DESIGN.md, State and recovery):
+//! `/var/lib/telamon-wizard/state.json` (DESIGN.md, State and recovery):
 //! root-owned, mode 0644, no secrets, written atomically.
 
 use crate::fsutil::write_atomic;
@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 /// Where the state lives.
-pub const DEFAULT_PATH: &str = "/var/lib/atlas-wizard/state.json";
+pub const DEFAULT_PATH: &str = "/var/lib/telamon-wizard/state.json";
 
 /// `finish` value: Finish has reached the step that writes the done markers.
 pub const FINISH_MARKERS: &str = "markers";
@@ -172,10 +172,17 @@ pub fn load(path: &Path) -> io::Result<Loaded> {
     let file = match fs::File::open(path) {
         Ok(f) => f,
         Err(e) if e.kind() == io::ErrorKind::NotFound => {
-            return Ok(Loaded {
-                state: State::default(),
-                warning: None,
-            });
+            // Atlas Wizard (0.1.x) kept it in /var/lib/atlas-wizard: moved
+            // once, then read as ours.
+            match adopt_legacy(path) {
+                Some(f) => f,
+                None => {
+                    return Ok(Loaded {
+                        state: State::default(),
+                        warning: None,
+                    });
+                }
+            }
         }
         Err(e) => return Err(e),
     };
@@ -199,6 +206,60 @@ pub fn load(path: &Path) -> io::Result<Loaded> {
             })
         }
     }
+}
+
+/// Where Atlas Wizard 0.1.x kept the state that is now at `path`:
+/// `.../var/lib/atlas-wizard/state.json` for `.../var/lib/telamon-wizard/state.json`.
+/// `None` for any other path (a test's own file).
+fn legacy_path(path: &Path) -> Option<PathBuf> {
+    let dir = path.parent()?;
+    if path.file_name()? != "state.json" || dir.file_name()? != "telamon-wizard" {
+        return None;
+    }
+    Some(dir.with_file_name(LEGACY_DIR).join("state.json"))
+}
+
+/// The directory name of 0.1.x's state.
+const LEGACY_DIR: &str = "atlas-wizard";
+
+/// When the state file of Atlas Wizard exists and ours does not, renames it
+/// to ours (one way, atomic: the same filesystem, so a cut leaves it in one
+/// place or the other) and opens it. A machine that was part way through
+/// setup carries on where it was. `None` when there is nothing to adopt, or
+/// it cannot be moved (logged; the state then starts empty as before, and
+/// the old file stays for the next try).
+fn adopt_legacy(path: &Path) -> Option<fs::File> {
+    let old = legacy_path(path)?;
+    let meta = fs::symlink_metadata(&old).ok()?;
+    if !meta.file_type().is_file() {
+        return None;
+    }
+    let linked = (|| {
+        if let Some(dir) = path.parent() {
+            fs::create_dir_all(dir)?;
+        }
+        // Never over a file that has appeared since.
+        fs::hard_link(&old, path)
+    })();
+    if let Err(e) = linked {
+        log::warn!(
+            "state: could not move {} to {}: {e}",
+            old.display(),
+            path.display()
+        );
+        return None;
+    }
+    // Ours exists now. The old one goes; if it cannot (a read-only /var/lib/atlas-wizard),
+    // it is only a stale copy, and ours is what is read from here on.
+    match fs::remove_file(&old) {
+        Ok(()) => log::info!("state: moved {} to {}", old.display(), path.display()),
+        Err(e) => log::warn!(
+            "state: copied {} to {}; the old file stays: {e}",
+            old.display(),
+            path.display()
+        ),
+    }
+    fs::File::open(path).ok()
 }
 
 fn move_aside(path: &Path) -> Option<PathBuf> {
@@ -247,6 +308,46 @@ mod tests {
         let l = load(&d.path().join("state.json")).unwrap();
         assert_eq!(l.state, State::default());
         assert_eq!(l.warning, None);
+    }
+
+    #[test]
+    fn atlas_wizards_state_is_moved_once_and_read() {
+        let d = dir();
+        let old_dir = d.path().join("var/lib/atlas-wizard");
+        let new = d.path().join("var/lib/telamon-wizard/state.json");
+        fs::create_dir_all(&old_dir).unwrap();
+        fs::create_dir_all(new.parent().unwrap()).unwrap();
+        let s = State {
+            boots: 2,
+            account: Some(Account {
+                name: "ada".into(),
+                uid: 1000,
+                stage: Stage::Verified,
+            }),
+            ..State::default()
+        };
+        s.save(&old_dir.join("state.json")).unwrap();
+        let l = load(&new).unwrap();
+        assert_eq!(l.state, s);
+        assert_eq!(l.warning, None);
+        assert!(new.exists(), "now ours");
+        assert!(!old_dir.join("state.json").exists(), "and no longer theirs");
+        // Ours wins over whatever is left of theirs, and is not touched.
+        State::default().save(&old_dir.join("state.json")).unwrap();
+        assert_eq!(load(&new).unwrap().state, s);
+        assert!(old_dir.join("state.json").exists());
+    }
+
+    #[test]
+    fn a_state_that_is_not_a_file_is_not_adopted() {
+        let d = dir();
+        let new = d.path().join("var/lib/telamon-wizard/state.json");
+        let old = d.path().join("var/lib/atlas-wizard/state.json");
+        fs::create_dir_all(old.parent().unwrap()).unwrap();
+        fs::create_dir_all(d.path().join("elsewhere")).unwrap();
+        std::os::unix::fs::symlink(d.path().join("elsewhere"), &old).unwrap();
+        assert_eq!(load(&new).unwrap().state, State::default());
+        assert!(!new.exists());
     }
 
     #[test]

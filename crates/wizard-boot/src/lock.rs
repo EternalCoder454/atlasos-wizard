@@ -1,4 +1,4 @@
-//! Cleanup once setup is done (DESIGN.md, "Locking `atlas-setup`"): remove the
+//! Cleanup once setup is done (DESIGN.md, "Locking `telamon-setup`"): remove the
 //! setup autologin, lock the setup user, end its session, empty its home.
 //!
 //! Every step first checks whether it is needed, so a finished machine's boot
@@ -6,7 +6,7 @@
 //! `Finish` does the same locking; both are idempotent.
 
 use crate::cmd::{Runner, run_logged};
-use crate::paths::{Paths, SETUP_USER};
+use crate::paths::{LEGACY_SETUP_USER, Paths, SETUP_USER};
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -23,10 +23,17 @@ const SETUP_SHELL: &str = "/bin/sh";
 /// wait for them, so none writes into the home after it is emptied.
 const LOGIND_WAIT: Duration = Duration::from_secs(5);
 
-/// Removes the setup autologin drop-in. True when it is gone afterwards.
+/// Removes the setup autologin drop-in, and Atlas Wizard's under its old name
+/// (it would log `atlas-setup` into a session that is gone). True when both
+/// are gone afterwards.
 pub fn remove_dropin(paths: &Paths) -> bool {
-    let p = paths.dropin();
-    match fs::remove_file(&p) {
+    let new = remove_one_dropin(&paths.dropin());
+    let old = remove_one_dropin(&paths.legacy_dropin());
+    new && old
+}
+
+fn remove_one_dropin(p: &Path) -> bool {
+    match fs::remove_file(p) {
         Ok(()) => {
             log::info!("removed the setup autologin {}", p.display());
             if let Some(dir) = p.parent()
@@ -65,50 +72,56 @@ fn expired(shadow: &str, name: &str, today: i64) -> Option<bool> {
     Some(field.parse::<i64>().is_ok_and(|d| d >= 0 && d <= today))
 }
 
-/// Locks `atlas-setup` (expired, nologin shell) where it is not already, and
-/// ends its logind user when it has one.
-fn lock_setup_user(paths: &Paths, run: &dyn Runner) {
+/// Locks `telamon-setup`, and Atlas Wizard's `atlas-setup` when the machine
+/// has it.
+fn lock_setup_users(paths: &Paths, run: &dyn Runner) {
+    lock_setup_user(paths, run, SETUP_USER);
+    lock_setup_user(paths, run, LEGACY_SETUP_USER);
+}
+
+/// Locks the setup user `user` (expired, nologin shell) where it is not
+/// already, and ends its logind user when it has one.
+fn lock_setup_user(paths: &Paths, run: &dyn Runner, user: &str) {
     let Some(passwd) = read_text(&paths.passwd()) else {
         return;
     };
     let Some(entry) = accounts::parse_passwd(&passwd)
         .into_iter()
-        .find(|e| e.name == SETUP_USER)
+        .find(|e| e.name == user)
     else {
-        log::info!("{SETUP_USER} does not exist; nothing to lock");
+        log::info!("{user} does not exist; nothing to lock");
         return;
     };
     let today = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| (d.as_secs() / 86400) as i64);
-    match read_text(&paths.shadow()).and_then(|s| expired(&s, SETUP_USER, today)) {
+    match read_text(&paths.shadow()).and_then(|s| expired(&s, user, today)) {
         Some(true) => {}
         Some(false) => {
-            if run_logged(run, CHAGE, &["-E", "0", SETUP_USER]) {
-                log::info!("{SETUP_USER}: account expired");
+            if run_logged(run, CHAGE, &["-E", "0", user]) {
+                log::info!("{user}: account expired");
             }
         }
-        None => log::warn!("{SETUP_USER} has no shadow entry; not expiring it"),
+        None => log::warn!("{user} has no shadow entry; not expiring it"),
     }
-    if accounts::login_shell(&entry.shell) && run_logged(run, USERMOD, &["-s", NOLOGIN, SETUP_USER])
-    {
-        log::info!("{SETUP_USER}: shell set to {NOLOGIN}");
+    if accounts::login_shell(&entry.shell) && run_logged(run, USERMOD, &["-s", NOLOGIN, user]) {
+        log::info!("{user}: shell set to {NOLOGIN}");
     }
     let logind = paths.logind_user(entry.uid);
-    if logind.exists() && run_logged(run, LOGINCTL, &["terminate-user", SETUP_USER]) {
+    if logind.exists() && run_logged(run, LOGINCTL, &["terminate-user", user]) {
         let start = Instant::now();
         while logind.exists() && start.elapsed() < LOGIND_WAIT {
             std::thread::sleep(Duration::from_millis(100));
         }
         if logind.exists() {
-            log::warn!("{SETUP_USER}: still has processes after terminate-user");
+            log::warn!("{user}: still has processes after terminate-user");
         } else {
-            log::info!("{SETUP_USER}: session ended");
+            log::info!("{user}: session ended");
         }
     }
 }
 
-/// The reverse of `lock_setup_user`, for when the wizard must run again (a
+/// The reverse of locking the setup user, for when the wizard must run again (a
 /// cut between Finish's lock and its markers, or markers removed by hand):
 /// the setup autologin needs an account that is not expired and a login
 /// shell. Each step runs only when passwd or shadow show it is needed.
@@ -175,7 +188,7 @@ pub fn empty_dir(dir: &Path) -> io::Result<usize> {
 /// All of the cleanup. Failures are logged and the rest still runs.
 pub fn cleanup(paths: &Paths, run: &dyn Runner) {
     remove_dropin(paths);
-    lock_setup_user(paths, run);
+    lock_setup_users(paths, run);
     match empty_dir(&paths.setup_home()) {
         Ok(0) => {}
         Ok(n) => log::info!("emptied {} ({n} entries)", paths.setup_home().display()),
@@ -188,9 +201,9 @@ mod tests {
     use super::*;
     use crate::fake::Fake;
 
-    const PASSWD: &str = "root:x:0:0::/root:/bin/bash\natlas-setup:x:975:975:AtlasOS Setup:/run/atlas-setup:/bin/sh\n";
-    const SHADOW_OPEN: &str = "root:!:1:::::::\natlas-setup:!*:19000:0:99999:7:::\n";
-    const SHADOW_LOCKED: &str = "root:!:1:::::::\natlas-setup:!*:19000:0:99999:7::0:\n";
+    const PASSWD: &str = "root:x:0:0::/root:/bin/bash\ntelamon-setup:x:975:975:Telamon Setup:/run/telamon-setup:/bin/sh\n";
+    const SHADOW_OPEN: &str = "root:!:1:::::::\ntelamon-setup:!*:19000:0:99999:7:::\n";
+    const SHADOW_LOCKED: &str = "root:!:1:::::::\ntelamon-setup:!*:19000:0:99999:7::0:\n";
 
     fn setup(passwd: &str, shadow: &str) -> (tempfile::TempDir, Paths) {
         let t = tempfile::tempdir().unwrap();
@@ -203,8 +216,8 @@ mod tests {
 
     #[test]
     fn expiry_parsing() {
-        assert_eq!(expired(SHADOW_OPEN, "atlas-setup", 20000), Some(false));
-        assert_eq!(expired(SHADOW_LOCKED, "atlas-setup", 20000), Some(true));
+        assert_eq!(expired(SHADOW_OPEN, "telamon-setup", 20000), Some(false));
+        assert_eq!(expired(SHADOW_LOCKED, "telamon-setup", 20000), Some(true));
         assert_eq!(expired(SHADOW_LOCKED, "nobody", 20000), None);
         // -1 means never; a future day is not yet expired.
         assert_eq!(
@@ -223,8 +236,8 @@ mod tests {
         assert_eq!(
             f.calls(),
             [
-                "/usr/bin/chage -E 0 atlas-setup",
-                "/usr/sbin/usermod -s /usr/sbin/nologin atlas-setup"
+                "/usr/bin/chage -E 0 telamon-setup",
+                "/usr/sbin/usermod -s /usr/sbin/nologin telamon-setup"
             ]
         );
     }
@@ -253,7 +266,10 @@ mod tests {
         fs::create_dir_all(t.path().join("run/systemd/users")).unwrap();
         fs::write(p.logind_user(975), "").unwrap();
         cleanup(&p, &f);
-        assert_eq!(f.calls(), ["/usr/bin/loginctl terminate-user atlas-setup"]);
+        assert_eq!(
+            f.calls(),
+            ["/usr/bin/loginctl terminate-user telamon-setup"]
+        );
     }
 
     #[test]
@@ -267,8 +283,8 @@ mod tests {
         assert_eq!(
             f.calls(),
             [
-                "/usr/bin/chage -E -1 atlas-setup",
-                "/usr/sbin/usermod -s /bin/sh atlas-setup"
+                "/usr/bin/chage -E -1 telamon-setup",
+                "/usr/sbin/usermod -s /bin/sh telamon-setup"
             ]
         );
         unlock_setup_user(&p, &f);
@@ -291,7 +307,7 @@ mod tests {
         let f = Fake::new(&p).failing("chage");
         cleanup(&p, &f);
         assert_eq!(f.calls().len(), 2, "usermod still ran");
-        assert!(!t.path().join("run/atlas-setup/answers.json").exists());
+        assert!(!t.path().join("run/telamon-setup/answers.json").exists());
     }
 
     #[test]

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Telamon Setup
+Comment=Set up Telamon OS: language, keyboard, network, time zone and your account
+Exec=telamon-wizard
+Icon=atlasos
+Terminal=false
+NoDisplay=true
+Categories=System;
+StartupNotify=false

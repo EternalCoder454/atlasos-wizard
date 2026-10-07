@@ -1,26 +1,29 @@
 //! Every filesystem path and fixed name the helper uses, behind one value, so
 //! tests can point the whole helper at a temporary root.
 //!
-//! In a release build the root is `/` and the setup user is `atlas-setup`; no
+//! In a release build the root is `/` and the setup user is `telamon-setup`; no
 //! environment variable is read. Only a build with the `test-root` feature
-//! (tests) reads `ATLAS_WIZARD_TEST_ROOT`, `ATLAS_WIZARD_TEST_SETUP_USER` and
-//! `ATLAS_WIZARD_TEST_IDLE_MS`.
+//! (tests) reads `TELAMON_WIZARD_TEST_ROOT`, `TELAMON_WIZARD_TEST_SETUP_USER` and
+//! `TELAMON_WIZARD_TEST_IDLE_MS`.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// The setup user's name.
-pub const SETUP_USER: &str = "atlas-setup";
+pub const SETUP_USER: &str = "telamon-setup";
 
-/// True when this build can be redirected by `ATLAS_WIZARD_TEST_*`.
+/// True when this build can be redirected by `TELAMON_WIZARD_TEST_*`.
 pub const TEST_ROOT_ENABLED: bool = cfg!(feature = "test-root");
 
 /// Where the setup autologin drop-in lives (relative to the root).
-pub const SETUP_AUTOLOGIN: &str = "etc/plasmalogin.conf.d/99-atlas-wizard.conf";
+pub const SETUP_AUTOLOGIN: &str = "etc/plasmalogin.conf.d/99-telamon-wizard.conf";
 /// The new account's autologin drop-in (relative to the root).
-pub const USER_AUTOLOGIN: &str = "etc/plasmalogin.conf.d/50-atlas-autologin.conf";
+pub const USER_AUTOLOGIN: &str = "etc/plasmalogin.conf.d/50-telamon-autologin.conf";
+/// Atlas Wizard's setup autologin drop-in (relative to the root): removed
+/// wherever it is found.
+pub const LEGACY_SETUP_AUTOLOGIN: &str = "etc/plasmalogin.conf.d/99-atlas-wizard.conf";
 /// The state file (relative to the root).
-pub const STATE_FILE: &str = "var/lib/atlas-wizard/state.json";
+pub const STATE_FILE: &str = "var/lib/telamon-wizard/state.json";
 /// The distribution's default `kdeglobals` (relative to the root).
 pub const SYSTEM_KDEGLOBALS: &str = "etc/xdg/kdeglobals";
 /// The high contrast colour scheme (relative to the root).
@@ -40,7 +43,7 @@ pub struct Paths {
 pub const IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 
 impl Paths {
-    /// The real system: root `/`, the setup user `atlas-setup`.
+    /// The real system: root `/`, the setup user `telamon-setup`.
     pub fn system() -> Paths {
         Paths {
             root: PathBuf::from("/"),
@@ -58,7 +61,7 @@ impl Paths {
     }
 
     /// The process's paths: [`Paths::system`], or, in a `test-root` build, as
-    /// the `ATLAS_WIZARD_TEST_*` variables say.
+    /// the `TELAMON_WIZARD_TEST_*` variables say.
     pub fn from_env() -> Paths {
         Paths::from_lookup(|k| std::env::var(k).ok())
     }
@@ -68,14 +71,15 @@ impl Paths {
     pub fn from_lookup(lookup: impl Fn(&str) -> Option<String>) -> Paths {
         let mut p = Paths::system();
         if TEST_ROOT_ENABLED {
-            if let Some(r) = lookup("ATLAS_WIZARD_TEST_ROOT").filter(|r| Path::new(r).is_absolute())
+            if let Some(r) =
+                lookup("TELAMON_WIZARD_TEST_ROOT").filter(|r| Path::new(r).is_absolute())
             {
                 p.root = PathBuf::from(r);
             }
-            if let Some(u) = lookup("ATLAS_WIZARD_TEST_SETUP_USER").filter(|u| !u.is_empty()) {
+            if let Some(u) = lookup("TELAMON_WIZARD_TEST_SETUP_USER").filter(|u| !u.is_empty()) {
                 p.setup_user = u;
             }
-            if let Some(ms) = lookup("ATLAS_WIZARD_TEST_IDLE_MS").and_then(|v| v.parse().ok()) {
+            if let Some(ms) = lookup("TELAMON_WIZARD_TEST_IDLE_MS").and_then(|v| v.parse().ok()) {
                 p.idle = Duration::from_millis(ms);
             }
         }
@@ -124,6 +128,11 @@ impl Paths {
         self.join(SETUP_AUTOLOGIN)
     }
 
+    /// Atlas Wizard's setup autologin drop-in.
+    pub fn legacy_setup_autologin(&self) -> PathBuf {
+        self.join(LEGACY_SETUP_AUTOLOGIN)
+    }
+
     /// The new account's autologin drop-in.
     pub fn user_autologin(&self) -> PathBuf {
         self.join(USER_AUTOLOGIN)
@@ -145,9 +154,9 @@ mod tests {
     #[test]
     fn env_is_read_only_in_test_root_builds() {
         let p = Paths::from_lookup(|k| match k {
-            "ATLAS_WIZARD_TEST_ROOT" => Some("/tmp/elsewhere".into()),
-            "ATLAS_WIZARD_TEST_SETUP_USER" => Some("someone".into()),
-            "ATLAS_WIZARD_TEST_IDLE_MS" => Some("250".into()),
+            "TELAMON_WIZARD_TEST_ROOT" => Some("/tmp/elsewhere".into()),
+            "TELAMON_WIZARD_TEST_SETUP_USER" => Some("someone".into()),
+            "TELAMON_WIZARD_TEST_IDLE_MS" => Some("250".into()),
             _ => None,
         });
         if TEST_ROOT_ENABLED {
@@ -163,7 +172,7 @@ mod tests {
 
     #[test]
     fn a_relative_test_root_is_ignored() {
-        let p = Paths::from_lookup(|k| (k == "ATLAS_WIZARD_TEST_ROOT").then(|| "rel/dir".into()));
+        let p = Paths::from_lookup(|k| (k == "TELAMON_WIZARD_TEST_ROOT").then(|| "rel/dir".into()));
         assert_eq!(p.root(), Path::new("/"));
     }
 

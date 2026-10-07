@@ -1,4 +1,4 @@
-//! AtlasOS Wizard's root D-Bus helper (`atlas-wizard-helper`): the only
+//! Telamon Wizard's root D-Bus helper (`telamon-wizard-helper`): the only
 //! privileged code the setup GUI reaches. Four methods, none of which takes a
 //! path, a command, an argument vector or a unit name; see `docs/DESIGN.md`,
 //! "The helper".

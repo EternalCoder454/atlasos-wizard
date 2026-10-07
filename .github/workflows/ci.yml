@@ -2,10 +2,10 @@ name: CI
 
 # Job graph:
 #   image  (dev-image.yml: the build image, published from main only)
-#     -> lint  (fmt, qmllint, Atlas rules, shellcheck, desktop files)
+#     -> lint  (fmt, qmllint, Telamon rules, shellcheck, desktop files)
 #          -> clippy | test | rpm     (in parallel)
-# Everything runs in ghcr.io/eternalcoder454/atlas-wizard-dev, which holds the
-# build dependencies and atlas-ui, so no job installs or builds them.
+# Everything runs in ghcr.io/eternalcoder454/telamon-wizard-dev, which holds the
+# build dependencies and telamon-ui, so no job installs or builds them.
 
 on:
   push:
@@ -66,7 +66,7 @@ env:
   CCACHE_MAXSIZE: 500M
   # The helper's bus tests skip without dbus-daemon and python-dbusmock; here
   # a missing tool must fail the run.
-  ATLAS_WIZARD_REQUIRE_BUS_TESTS: "1"
+  TELAMON_WIZARD_REQUIRE_BUS_TESTS: "1"
 
 jobs:
   # main: publishes the image when GHCR's is missing or out of date (the first
@@ -89,7 +89,7 @@ jobs:
       contents: read
       packages: read
     container:
-      image: ghcr.io/eternalcoder454/atlas-wizard-dev:44
+      image: ghcr.io/eternalcoder454/telamon-wizard-dev:44
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
@@ -102,14 +102,14 @@ jobs:
         run: cargo fmt --all --check
 
       - name: QML lint
-        run: qmllint-qt6 apps/atlas-wizard/qml/*.qml
+        run: qmllint-qt6 apps/telamon-wizard/qml/*.qml
 
       # atlas-framework's design rules (no default buttons, no QML file named
-      # like an Atlas.Ui type), from the framework tag baked into the image.
-      - name: Atlas design rules
+      # like a Telamon.Ui type), from the framework tag baked into the image.
+      - name: Telamon design rules
         run: |
-          "$ATLAS_FRAMEWORK/tools/lint-app.sh" .
-          "$ATLAS_FRAMEWORK/tools/check-app-names.sh" .
+          "$TELAMON_FRAMEWORK/tools/lint-app.sh" .
+          "$TELAMON_FRAMEWORK/tools/check-app-names.sh" .
 
       - name: Shell scripts
         run: shellcheck scripts/*.sh ci/*.sh packaging/*.sh data/libexec/*
@@ -135,7 +135,7 @@ jobs:
       contents: read
       packages: read
     container:
-      image: ghcr.io/eternalcoder454/atlas-wizard-dev:44
+      image: ghcr.io/eternalcoder454/telamon-wizard-dev:44
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
@@ -174,7 +174,7 @@ jobs:
       contents: read
       packages: read
     container:
-      image: ghcr.io/eternalcoder454/atlas-wizard-dev:44
+      image: ghcr.io/eternalcoder454/telamon-wizard-dev:44
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
@@ -213,7 +213,7 @@ jobs:
       contents: read
       packages: read
     container:
-      image: ghcr.io/eternalcoder454/atlas-wizard-dev:44
+      image: ghcr.io/eternalcoder454/telamon-wizard-dev:44
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
@@ -245,7 +245,7 @@ jobs:
           key: ccache-rpm-${{ github.sha }}
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: atlas-wizard-rpm
+          name: telamon-wizard-rpm
           path: out/*.rpm
           if-no-files-found: error
           retention-days: 14

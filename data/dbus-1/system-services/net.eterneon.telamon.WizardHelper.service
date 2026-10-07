@@ -1,0 +1,5 @@
+[D-BUS Service]
+Name=net.eterneon.telamon.WizardHelper
+Exec=/bin/false
+User=root
+SystemdService=telamon-wizard-helper.service

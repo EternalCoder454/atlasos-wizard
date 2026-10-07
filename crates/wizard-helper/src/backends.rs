@@ -374,7 +374,7 @@ pub fn child_env(req: &UserSettingsRequest, _paths: &Paths) -> Vec<(String, Stri
     ];
     #[cfg(feature = "test-root")]
     env.push((
-        "ATLAS_WIZARD_TEST_ROOT".to_string(),
+        "TELAMON_WIZARD_TEST_ROOT".to_string(),
         _paths.root().to_string_lossy().into_owned(),
     ));
     env
