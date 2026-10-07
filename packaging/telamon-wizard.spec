@@ -5,7 +5,7 @@
 %global debug_package %{nil}
 
 Name:           telamon-wizard
-Version:        0.2.0
+Version:        0.2.1
 Release:        1%{?dist}
 Summary:        Telamon Setup, the first-run wizard of Telamon OS
 License:        MIT
@@ -257,6 +257,17 @@ done
 # files when it is removed. /etc/telamon and /etc/atlasos are made by tmpfiles.d.
 
 %changelog
+* Wed Oct 07 2026 EternalHell <77252745+EternalCoder454@users.noreply.github.com> - 0.2.1-1
+- The Light and Dark examples are drawn miniatures of the Telamon OS desktop
+  that follow the accent colour, with a check mark and focus ring.
+- The first row of a list (Wi-Fi, language, keyboard, time zone) can be
+  chosen; it couldn't before.
+- Pages are made when first shown: the first frame comes about a fifth sooner
+  and idle memory is lower.
+- The terminal setup turns echo off before it asks for a password.
+- Smaller fixes: the welcome mark never shows blank, Finish greys out once
+  pressed, one main button on Wi-Fi, pages scroll on small screens.
+
 * Wed Oct 07 2026 EternalHell <77252745+EternalCoder454@users.noreply.github.com> - 0.2.0-1
 - Renamed to Telamon Setup (telamon-wizard, net.eterneon.telamon.wizard), on
   Telamon.Ui 2.0.0; replaces atlas-wizard
