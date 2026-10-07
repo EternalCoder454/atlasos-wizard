@@ -1,6 +1,5 @@
 import QtQuick
 import QtQuick.Layouts
-import org.kde.kirigami as Kirigami
 import Telamon.Ui
 
 WizardPage {
@@ -15,7 +14,6 @@ WizardPage {
     property bool hiddenNetwork: false
     readonly property var current: selected >= 0 && selected < networks.length ? networks[selected] : null
 
-    stepId: "wifi"
     title: qsTr("Wi-Fi")
     subtitle: qsTr("Connect to the internet for updates, or skip this for now.")
     skippable: true
@@ -88,14 +86,21 @@ WizardPage {
     TelamonListView {
         Layout.fillWidth: true
         Layout.fillHeight: true
-        Layout.minimumHeight: Kirigami.Units.gridUnit * 6
+        Layout.minimumHeight: TelamonStyle.rowHeight * 3
         visible: !page.hiddenNetwork
         Accessible.name: qsTr("Available Networks")
         textRole: "ssid"
         subtitleRole: "info"
-        placeholderText: page.scanning ? qsTr("Looking for networks…") : qsTr("No networks found.")
-        model: page.networks.map(n => ({ ssid: n.ssid, info: (n.secure ? qsTr("Secured") : qsTr("Open")) + " · " + qsTr("%1% signal").arg(n.strength) }))
-        onCurrentIndexChanged: page.selected = currentIndex
+        status: page.scanning ? TelamonStatus.Loading : (page.networks.length === 0 ? TelamonStatus.Empty : TelamonStatus.Ready)
+        statusTitle: page.scanning ? qsTr("Looking for networks…") : qsTr("No Networks Found")
+        statusText: page.scanning || page.networks.length > 0 ? "" : qsTr("Move closer to your router, then scan again.")
+        model: page.networks.map(n => ({
+                    ssid: n.ssid,
+                    info: (n.secure ? qsTr("Secured") : qsTr("Open")) + " · " + qsTr("%1% signal").arg(n.strength)
+                }))
+        // The selection, not `currentIndex`: that starts at 0, so a click on
+        // the first network changes nothing in it.
+        onSelectedIndexesChanged: page.selected = selectedIndexes.length > 0 ? selectedIndexes[0] : -1
     }
     TelamonTextField {
         id: hiddenSsid
@@ -109,7 +114,12 @@ WizardPage {
         Layout.fillWidth: true
         visible: page.hiddenNetwork || (page.current !== null && page.current.secure)
         placeholderText: qsTr("Password")
-        onAccepted: if (connectButton.enabled) page._connect()
+        onAccepted: if (connectButton.enabled)
+            page._connect()
+    }
+    Item {
+        Layout.fillHeight: true
+        visible: page.hiddenNetwork
     }
     RowLayout {
         Layout.fillWidth: true
@@ -121,7 +131,7 @@ WizardPage {
         Item {
             Layout.fillWidth: true
         }
-        PrimaryButton {
+        SecondaryButton {
             id: connectButton
             text: qsTr("Connect")
             busy: page.connecting

@@ -332,8 +332,8 @@ Appearance, Privacy, Finish. First login: Fingerprint, PIN.
   `fedora`, prefilled `telamon` (the image's `DEFAULT_HOSTNAME`, which still says `atlasos`
 until the image moves; nothing
   personal goes on the network unless the user types it).
-- **Appearance**: Telamon OS Light / Dark pictured as desktops, and accent
-  swatches (violet first).
+- **Appearance**: Telamon OS Light / Dark pictured as desktops (drawn, in the
+  chosen accent), and accent swatches (violet first) with the colour's name.
 - **Privacy**: "Send crash reports" off by default, with what a report holds.
 
 Look: as the patched plasma-setup (welcome with the Telamon OS logo, a card with
@@ -342,16 +342,19 @@ built from Telamon.Ui: `TelamonWindow` full screen with no close, `TelamonOnboar
 `TelamonTextField`, `TelamonPasswordField`, `TelamonComboBox`, `TelamonSwitch`,
 `Section`/`SectionRow`, `PrimaryButton`/`SecondaryButton`, `StatusHero`.
 What Telamon.Ui lacks is asked of the framework; until then a local copy has a
-`Wizard` prefix so it never clashes with a Telamon.Ui type. Telamon.Ui 1.5.0
-will have them (framework ROADMAP item 42), so each stand-in mirrors the
-1.5.0 API exactly and moving to it is a rename:
+`Wizard` prefix so it never clashes with a Telamon.Ui type. The password
+strength bar and the accent picker moved to `TelamonPasswordStrength` and
+`TelamonAccentPicker` (2.0.0) and their stand-ins are gone. What is local:
 
-| Stand-in (0.1.0, on 1.4.0) | Telamon.Ui 1.5.0 | API to mirror |
+| Local type | Why | What it is |
 |---|---|---|
-| `WizardOnboarding` | `TelamonOnboarding` additions | `nextText`, `finishText`, `backText` (empty = built-in); `busy` (Next shows a spinner and ignores input, Back and Skip disabled, `Accessible.description` "Busy"); `autoAdvance` (default true) and `advanceRequested(int index)` on every Next, the app calls `next()` itself when false; `canGoBack` (default true; false hides Back, Alt+Left does nothing); `stepStyle: Column \| Dots` (current dot wider in accent, past accent 45 %, future text 20 %, width animation off under reduced motion) |
-| `WizardPasswordStrength` | `TelamonPasswordStrength` | `score` 0–4, -1 = nothing typed (empty bar, no label); `text` (empty = "Very Weak" … "Strong"); accessible value "<label>, <score> of 4" |
-| `WizardChoiceCard` | `TelamonChoiceCard` | AbstractButton, checkable; `source`, `text`, `checked`, `aspectRatio` (1.6); check circle, checked ring, hover ring |
-| `WizardAccentPicker` | `TelamonAccentPicker` | `model` (colours or `{color, name}`), `currentIndex`, `currentColor` (read-only), `activated(int)`; arrows, Home/End; accessible name = name or "Accent color N" |
+| `WizardOnboarding` | `TelamonOnboarding` has no hidden pages | The card, the step dots, Back / Skip / Next. `finishText`; `busy` (Next shows a spinner and ignores input, Back and Skip disabled); `autoAdvance` and `advanceRequested(int index)` on every Next, the app calls `next()` itself when false; `canGoBack`; a step with `hidden: true` is left out of the dots and of Back and Next; a page's `submitted` signal (Return in a field) is Next. A page fades in by a card-coloured cover fading out (the page is drawn once). |
+| `WizardStep` | start-up cost | Holds a page as a `Component` and makes it the first time it shows, or 400 ms after the page before it (so Next never waits). Once made it stays with what the user typed. `hidden` is the step's (known before the page exists); `title`, `canAdvance` and `skippable` are read from the page; `setError()`, `enter()`, `item`. |
+| `WizardPage` | the page frame | Title, subtitle, error banner, body column. It scrolls when its content needs more than the card gives (a small screen, larger text). |
+| `WizardChoiceCard` | `TelamonChoiceCard` only takes an image | Its look and its `checked` binding rule, with the picture declared inside (`default property preview`). |
+| `WizardThemePreview` | the Appearance picture | A 16:10 picture of the Telamon OS desktop in Light or Dark drawn with shapes (wallpaper, the menu bar's islands, a Telamon.Ui window, the dock), in the colours TelamonStyle derives from the TelamonLight and TelamonDark schemes and the chosen accent, every edge snapped to a device pixel. No image, so it is sharp at any scale. |
+| `WizardLogo` | no `telamon` icon in a container or minimal session | The Telamon mark drawn with shapes (the welcome page). It is not looked up in the icon theme. |
+| `WizardPicker` | filterable list | Search field and `TelamonListView` with `TelamonStatus` (loading, no results). It picks by the list's selection, not `currentIndex` (which starts at 0, so the first row could not be chosen). |
 | `onClosing: close.accepted = false` + `visibility: Window.FullScreen` | `TelamonWindow.kiosk` | full screen, no close, close requests refused |
 
 ## Threading and errors
@@ -373,7 +376,10 @@ Measured in the P phase against plasma-setup's full-Plasma session as the
 baseline: wizard window within 1.5 s of the setup session starting on a cold
 boot; wizard RSS ≤ 140 MB; the whole setup session PSS ≤ 350 MB; idle CPU
 < 1 %; the helper ≤ 10 MB and gone when idle. Lists (locales, layouts, time
-zones) load on a worker on first view.
+zones) load on a worker on first view; a page is made when first shown
+(`WizardStep`). `scripts/bench.sh` measures start-up, memory and CPU in demo
+mode; `scripts/screenshots.sh` takes every page and state in both colour
+schemes at 1x, 1.7x and 2x (headless, in the dev container).
 
 ## Demo mode and start-up probes
 

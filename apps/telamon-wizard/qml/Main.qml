@@ -1,5 +1,5 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import org.kde.kirigami as Kirigami
 import Telamon.Ui
 
 TelamonWindow {
@@ -69,7 +69,9 @@ TelamonWindow {
         root.answers = Object.assign({}, a, d);
         if (s.resumeAccount) {
             root.accountDone = true;
-            root.answers = Object.assign({}, root.answers, { userName: s.resumeAccount });
+            root.answers = Object.assign({}, root.answers, {
+                userName: s.resumeAccount
+            });
         }
         root.backend.setTextScale(root.answers.textScale ?? 1);
         if (root.answers.screenReader) {
@@ -90,14 +92,14 @@ TelamonWindow {
         root.started = true;
         root.enter(onboarding.pages[target]);
     }
-    // Lists load the first time their page shows.
-    function enter(page: var): void {
-        if (page && page.load) {
-            page.load();
+    // The page's step makes the page and has it load its lists the first time
+    // it shows.
+    function enter(step: var): void {
+        if (step) {
+            step.enter();
         }
     }
-    function pageFor(what: string): var {
-        const id = what === "finish" ? "finish" : what;
+    function stepFor(id: string): var {
         return onboarding.pages[indexOfStep(id)];
     }
 
@@ -118,33 +120,37 @@ TelamonWindow {
         function onCompleted(what: string, ok: bool, code: string, text: string): void {
             if (what === "screenReader" || what === "highContrast") {
                 if (!ok) {
-                    welcome.errorText = errors.text(code);
+                    welcomeStep.setError(errors.text(code));
                 }
                 return;
             }
             if (what === "wifi") {
-                wifi.connectDone(ok, code);
+                wifiStep.item?.connectDone(ok, code);
                 return;
             }
-            const page = root.pageFor(what);
+            const step = root.stepFor(what);
             onboarding.busy = false;
             root.waitingFor = "";
             if (!ok) {
-                page.errorText = errors.text(code);
+                step.setError(errors.text(code));
                 if (what === "finish") {
-                    finish.working = false;
+                    finishStep.item.working = false;
                 }
                 return;
             }
-            page.errorText = "";
+            step.setError("");
             if (what === "account") {
+                const account = accountStep.item;
                 account.clearPassword();
                 root.accountDone = true;
-                root.setAnswers({ userName: account.userName, fullName: account.fullName });
+                root.setAnswers({
+                    userName: account.userName,
+                    fullName: account.fullName
+                });
                 onboarding.next();
             } else if (what === "finish") {
-                finish.working = false;
-                finish.done = true;
+                finishStep.item.working = false;
+                finishStep.item.done = true;
             } else {
                 onboarding.next();
             }
@@ -176,7 +182,7 @@ TelamonWindow {
         anchors.fill: parent
         visible: !root.backend.welcomeMode && root.started
         autoAdvance: false
-        canGoBack: !finish.done
+        canGoBack: !(finishStep.item?.done ?? false)
         finishText: qsTr("Finish")
         onCurrentIndexChanged: {
             if (root.started) {
@@ -186,7 +192,7 @@ TelamonWindow {
         }
         onSkipped: index => {
             const p = onboarding.pages[index];
-            p.errorText = "";
+            p.setError("");
             if (p.stepId === "wifi") {
                 root.setAnswer("wifiDone", true);
             }
@@ -194,7 +200,7 @@ TelamonWindow {
         onAdvanceRequested: index => {
             const p = onboarding.pages[index];
             const a = root.answers;
-            p.errorText = "";
+            p.setError("");
             const call = (what, x, y) => {
                 root.waitingFor = what;
                 onboarding.busy = true;
@@ -213,17 +219,17 @@ TelamonWindow {
             case "hostname":
                 // The page's own value: answers only hold the name once it is
                 // edited, and sending "" for an untouched prefill failed.
-                call("hostname", p.hostname, "");
+                call("hostname", p.item.hostname, "");
                 break;
             case "account":
                 root.waitingFor = "account";
                 onboarding.busy = true;
-                root.backend.createAccount(account.userName, account.fullName, account.takePassword(), account.autologin);
+                root.backend.createAccount(p.item.userName, p.item.fullName, p.item.takePassword(), p.item.autologin);
                 break;
             case "finish":
                 root.waitingFor = "finish";
                 onboarding.busy = true;
-                finish.working = true;
+                p.item.working = true;
                 root.backend.finishSetup();
                 break;
             default:
@@ -231,76 +237,116 @@ TelamonWindow {
             }
         }
 
-        WelcomePage {
-            id: welcome
-            screenReader: root.answers.screenReader ?? false
-            largerText: (root.answers.textScale ?? 1) > 1
-            highContrast: root.answers.highContrast ?? false
-            highContrastAvailable: root.startup.highContrastAvailable ?? false
-            onOptionToggled: (what, on) => {
-                if (what === "screenReader") {
-                    root.toggleScreenReader(on);
-                } else if (what === "largerText") {
-                    root.setAnswer("textScale", on ? 1.25 : 1.0);
-                    root.backend.setTextScale(on ? 1.25 : 1.0);
-                } else {
-                    root.setAnswer("highContrast", on);
-                    root.backend.setOption("highContrast", on);
+        WizardStep {
+            id: welcomeStep
+            stepId: "welcome"
+            WelcomePage {
+                screenReader: root.answers.screenReader ?? false
+                largerText: (root.answers.textScale ?? 1) > 1
+                highContrast: root.answers.highContrast ?? false
+                highContrastAvailable: root.startup.highContrastAvailable ?? false
+                onOptionToggled: (what, on) => {
+                    if (what === "screenReader") {
+                        root.toggleScreenReader(on);
+                    } else if (what === "largerText") {
+                        root.setAnswer("textScale", on ? 1.25 : 1.0);
+                        root.backend.setTextScale(on ? 1.25 : 1.0);
+                    } else {
+                        root.setAnswer("highContrast", on);
+                        root.backend.setOption("highContrast", on);
+                    }
                 }
             }
         }
-        LanguagePage {
-            backend: root.backend
+        WizardStep {
+            stepId: "language"
             hidden: root.startup.skipLanguage ?? false
-            language: root.answers.language ?? ""
-            canAdvance: !(root.waitingFor !== "")
-            onChosen: locale => root.setAnswer("language", locale)
+            LanguagePage {
+                backend: root.backend
+                language: root.answers.language ?? ""
+                canAdvance: root.waitingFor === ""
+                onChosen: locale => root.setAnswer("language", locale)
+            }
         }
-        KeyboardPage {
-            backend: root.backend
+        WizardStep {
+            stepId: "keyboard"
             hidden: root.startup.skipKeyboard ?? false
-            layout: root.answers.keyboardLayout ?? ""
-            variant: root.answers.keyboardVariant ?? ""
-            onChosen: (layout, variant) => root.setAnswers({ keyboardLayout: layout, keyboardVariant: variant })
+            KeyboardPage {
+                backend: root.backend
+                layout: root.answers.keyboardLayout ?? ""
+                variant: root.answers.keyboardVariant ?? ""
+                onChosen: (layout, variant) => root.setAnswers({
+                        keyboardLayout: layout,
+                        keyboardVariant: variant
+                    })
+            }
         }
-        WifiPage {
-            id: wifi
-            backend: root.backend
+        WizardStep {
+            id: wifiStep
+            stepId: "wifi"
             hidden: root.startup.skipWifi ?? false
+            WifiPage {
+                backend: root.backend
+            }
         }
-        TimeZonePage {
-            backend: root.backend
-            zone: root.answers.timezone ?? ""
-            onChosen: id => root.setAnswer("timezone", id)
+        WizardStep {
+            stepId: "timezone"
+            TimeZonePage {
+                backend: root.backend
+                zone: root.answers.timezone ?? ""
+                onChosen: id => root.setAnswer("timezone", id)
+            }
         }
-        AccountPage {
-            id: account
-            backend: root.backend
+        WizardStep {
+            id: accountStep
+            stepId: "account"
             hidden: root.accountDone
-            fullName: root.answers.fullName ?? ""
-            userName: root.answers.userName ?? ""
-            userNameEdited: root.answers.userNameEdited ?? false
-            autologin: root.answers.autologin ?? false
-            onEdited: root.setAnswers({ fullName: fullName, userName: userName, userNameEdited: userNameEdited, autologin: autologin })
+            AccountPage {
+                backend: root.backend
+                fullName: root.answers.fullName ?? ""
+                userName: root.answers.userName ?? ""
+                userNameEdited: root.answers.userNameEdited ?? false
+                autologin: root.answers.autologin ?? false
+                onEdited: root.setAnswers({
+                    fullName: fullName,
+                    userName: userName,
+                    userNameEdited: userNameEdited,
+                    autologin: autologin
+                })
+            }
         }
-        HostnamePage {
+        WizardStep {
+            stepId: "hostname"
             hidden: !(root.startup.askHostname ?? false)
-            // A neutral name, the same as the image's DEFAULT_HOSTNAME. It was
-            // "<user>-pc", which put the account name on the network.
-            hostname: root.answers.hostname || "telamon"
-            onEdited: root.setAnswer("hostname", hostname)
+            HostnamePage {
+                // A neutral name, the same as the image's DEFAULT_HOSTNAME. It was
+                // "<user>-pc", which put the account name on the network.
+                hostname: root.answers.hostname || "telamon"
+                onEdited: root.setAnswer("hostname", hostname)
+            }
         }
-        AppearancePage {
-            look: root.answers.look ?? "light"
-            accent: root.answers.accent ?? "#6858E2" // telamon-lint: allow-raw
-            onEdited: root.setAnswers({ look: look, accent: accent })
+        WizardStep {
+            stepId: "appearance"
+            AppearancePage {
+                look: root.answers.look ?? "light"
+                accent: root.answers.accent ?? "#6858E2" // telamon-lint: allow-raw
+                onEdited: root.setAnswers({
+                    look: look,
+                    accent: accent
+                })
+            }
         }
-        PrivacyPage {
-            crashReports: root.answers.crashReports ?? false
-            onToggled: on => root.setAnswer("crashReports", on)
+        WizardStep {
+            stepId: "privacy"
+            PrivacyPage {
+                crashReports: root.answers.crashReports ?? false
+                onToggled: on => root.setAnswer("crashReports", on)
+            }
         }
-        FinishPage {
-            id: finish
+        WizardStep {
+            id: finishStep
+            stepId: "finish"
+            FinishPage {}
         }
     }
 }

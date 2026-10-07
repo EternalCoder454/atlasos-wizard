@@ -12,16 +12,18 @@ WizardPage {
     property bool highContrastAvailable: false
     signal optionToggled(string what, bool on)
 
-    stepId: "welcome"
     title: qsTr("Welcome to Telamon OS")
     subtitle: qsTr("Let's set up your computer. This takes a few minutes.")
 
-    Kirigami.Icon {
+    Item {
+        Layout.fillHeight: true
+    }
+    // The mark is drawn, not looked up in the icon theme: it is the same on
+    // every system, sharp at any scale, and there is no theme lookup (a missing
+    // icon would show a blank or a generic file).
+    WizardLogo {
         Layout.alignment: Qt.AlignHCenter
-        Layout.preferredWidth: Kirigami.Units.iconSizes.enormous
-        Layout.preferredHeight: Kirigami.Units.iconSizes.enormous
-        source: "telamon"
-        fallback: "distributor-logo"
+        size: Kirigami.Units.iconSizes.enormous
     }
     Section {
         Layout.fillWidth: true
@@ -49,5 +51,6 @@ WizardPage {
     }
     Item {
         Layout.fillHeight: true
+        Layout.preferredHeight: 1
     }
 }

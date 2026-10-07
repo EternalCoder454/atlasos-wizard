@@ -4,30 +4,21 @@ import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 import Telamon.Ui
 
-// Stand-in for Telamon.Ui 1.5.0's TelamonOnboarding additions (same API):
-// nextText/finishText/backText, busy, autoAdvance + advanceRequested(index),
-// canGoBack, stepStyle. Local extra: a page with `hidden: true` is left out
-// of the steps and of Back/Next.
+// The wizard's TelamonOnboarding: finishText, busy, autoAdvance +
+// advanceRequested(index), canGoBack as there, with the step dots only. Local
+// extras: a page with `hidden: true` is left out of the steps and of
+// Back/Next, and a page's `submitted` signal (Return in one of its fields)
+// is Next.
 Item {
     id: control
-
-    enum StepStyle {
-        Column,
-        Dots
-    }
 
     default property list<Item> pages
     property int currentIndex: 0
     readonly property int count: pages.length
-    property bool showSteps: true
-    property bool showSkip: false
-    property string nextText
     property string finishText
-    property string backText
     property bool busy: false
     property bool autoAdvance: true
     property bool canGoBack: true
-    property int stepStyle: WizardOnboarding.StepStyle.Dots
 
     signal finished
     signal skipped(int index)
@@ -103,9 +94,37 @@ Item {
         }
     }
 
-    onCurrentIndexChanged: priv.show(true)
+    onCurrentIndexChanged: {
+        priv.show(true);
+        preload.restart();
+    }
     onPagesChanged: priv.show(false)
-    Component.onCompleted: priv.show(false)
+    Component.onCompleted: {
+        priv.show(false);
+        preload.restart();
+    }
+
+    // The page's `submitted` (Return in a field) is Next. The step's item,
+    // once made.
+    Connections {
+        target: control.page ? control.page["item"] : null
+        ignoreUnknownSignals: true
+        function onSubmitted(): void {
+            control._nextPressed();
+        }
+    }
+    // The next page is made a moment after this one shows, while the user
+    // reads, so Next never waits for it.
+    Timer {
+        id: preload
+        interval: 400
+        onTriggered: {
+            const n = control.order.find(i => i > control.currentIndex);
+            if (n !== undefined) {
+                control.pages[n].ensure();
+            }
+        }
+    }
 
     QtObject {
         id: priv
@@ -135,116 +154,100 @@ Item {
         anchors.centerIn: parent
         width: Math.min(parent.width - Kirigami.Units.gridUnit * 2, Kirigami.Units.gridUnit * 46)
         height: Math.min(parent.height - Kirigami.Units.gridUnit * 2, Kirigami.Units.gridUnit * 36)
-        radius: Kirigami.Units.cornerRadius * 2
-        color: Kirigami.Theme.backgroundColor
+        radius: TelamonStyle.radiusLarge * 1.5
+        color: TelamonStyle.surface
         border.width: 1
         border.color: TelamonStyle.separator
 
-        RowLayout {
+        ColumnLayout {
             anchors.fill: parent
             anchors.margins: Kirigami.Units.gridUnit * 1.5
-            spacing: Kirigami.Units.gridUnit
+            spacing: TelamonStyle.spacingLarge
 
-            ColumnLayout {
-                Layout.fillHeight: true
-                Layout.preferredWidth: Kirigami.Units.gridUnit * 10
-                visible: control.stepStyle === WizardOnboarding.StepStyle.Column && control.showSteps
+            Row {
+                Layout.alignment: Qt.AlignHCenter
+                visible: control.order.length > 1
+                spacing: Kirigami.Units.smallSpacing
+                Accessible.role: Accessible.ProgressBar
+                Accessible.name: qsTr("Step %1 of %2").arg(control.position + 1).arg(control.order.length)
                 Repeater {
-                    model: control.order
-                    StepItem {
-                        id: step
+                    model: control.order.length
+                    Rectangle {
+                        id: dot
                         required property int index
-                        required property int modelData
-                        Layout.fillWidth: true
-                        number: step.index + 1
-                        text: String(control.pages[step.modelData]["title"] ?? "")
-                        current: step.modelData === control.currentIndex
-                        done: step.index < control.position
-                        onClicked: if (control.canGoBack && !control.busy) control.currentIndex = step.modelData
-                    }
-                }
-                Item {
-                    Layout.fillHeight: true
-                }
-            }
-
-            ColumnLayout {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                spacing: Kirigami.Units.largeSpacing
-
-                Row {
-                    Layout.alignment: Qt.AlignHCenter
-                    visible: control.stepStyle === WizardOnboarding.StepStyle.Dots && control.showSteps
-                    spacing: Kirigami.Units.smallSpacing
-                    Accessible.role: Accessible.ProgressBar
-                    Accessible.name: qsTr("Step %1 of %2").arg(control.position + 1).arg(control.order.length)
-                    Repeater {
-                        model: control.order.length
-                        Rectangle {
-                            id: dot
-                            required property int index
-                            readonly property bool current: index === control.position
-                            width: current ? Kirigami.Units.gridUnit * 1.4 : Kirigami.Units.gridUnit * 0.5
-                            height: Kirigami.Units.gridUnit * 0.5
-                            radius: height / 2
-                            color: current ? TelamonStyle.accent : (index < control.position ? Qt.alpha(TelamonStyle.accent, 0.45) : Qt.alpha(Kirigami.Theme.textColor, 0.2))
-                            Behavior on width {
-                                NumberAnimation {
-                                    duration: TelamonStyle.duration
-                                }
+                        readonly property bool current: index === control.position
+                        width: current ? Kirigami.Units.gridUnit * 1.4 : Kirigami.Units.gridUnit * 0.5
+                        height: Kirigami.Units.gridUnit * 0.5
+                        radius: height / 2
+                        color: current ? TelamonStyle.accent : (index < control.position ? TelamonStyle.alpha(TelamonStyle.accent, 0.45) : TelamonStyle.alpha(TelamonStyle.text, 0.2))
+                        Behavior on width {
+                            NumberAnimation {
+                                duration: TelamonStyle.duration
                             }
                         }
                     }
                 }
+            }
 
-                Item {
-                    id: host
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    clip: true
-                    NumberAnimation {
-                        id: fade
-                        target: host
-                        property: "opacity"
-                        from: 0
-                        to: 1
-                        duration: TelamonStyle.duration
-                    }
-                }
-
+            Item {
+                id: host
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                // A page fades in by a card-coloured cover fading out: the
+                // page is drawn once and only the cover's alpha changes
+                // each frame, where fading the page itself would redraw
+                // it (and its text) through an offscreen layer.
                 Rectangle {
-                    Layout.fillWidth: true
-                    implicitHeight: 1
-                    color: TelamonStyle.separator
+                    id: cover
+                    anchors.fill: parent
+                    z: 100
+                    color: TelamonStyle.surface
+                    opacity: 0
+                    visible: opacity > 0
+                    Accessible.ignored: true
                 }
+                NumberAnimation {
+                    id: fade
+                    target: cover
+                    property: "opacity"
+                    from: 1
+                    to: 0
+                    duration: TelamonStyle.duration
+                }
+            }
 
-                RowLayout {
+            Rectangle {
+                Layout.fillWidth: true
+                implicitHeight: 1
+                color: TelamonStyle.separator
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Kirigami.Units.largeSpacing
+
+                SecondaryButton {
+                    visible: control.canGoBack && control.position > 0
+                    enabled: !control.busy
+                    text: qsTr("Back")
+                    onClicked: control.back()
+                }
+                Item {
                     Layout.fillWidth: true
-                    spacing: Kirigami.Units.largeSpacing
-
-                    SecondaryButton {
-                        visible: control.canGoBack && control.position > 0
-                        enabled: !control.busy
-                        text: control.backText !== "" ? control.backText : qsTr("Back")
-                        onClicked: control.back()
-                    }
-                    Item {
-                        Layout.fillWidth: true
-                    }
-                    TextButton {
-                        visible: control.showSkip || control.pageSkippable
-                        enabled: !control.busy
-                        text: qsTr("Skip")
-                        onClicked: control.skip()
-                    }
-                    PrimaryButton {
-                        text: control.isLast ? (control.finishText !== "" ? control.finishText : qsTr("Finish")) : (control.nextText !== "" ? control.nextText : qsTr("Next"))
-                        enabled: control.canAdvanceNow
-                        busy: control.busy
-                        Accessible.description: control.busy ? qsTr("Busy") : ""
-                        onClicked: control._nextPressed()
-                    }
+                }
+                TextButton {
+                    visible: control.pageSkippable
+                    enabled: !control.busy
+                    text: qsTr("Skip")
+                    onClicked: control.skip()
+                }
+                PrimaryButton {
+                    text: control.isLast ? (control.finishText !== "" ? control.finishText : qsTr("Finish")) : qsTr("Next")
+                    enabled: control.canAdvanceNow
+                    busy: control.busy
+                    Accessible.description: control.busy ? qsTr("Busy") : ""
+                    onClicked: control._nextPressed()
                 }
             }
         }

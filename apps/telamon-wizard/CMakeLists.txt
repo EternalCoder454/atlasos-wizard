@@ -46,9 +46,10 @@ qt_add_qml_module(telamon-wizard-app
         qml/ErrorText.qml
         qml/WizardPage.qml
         qml/WizardOnboarding.qml
-        qml/WizardPasswordStrength.qml
+        qml/WizardStep.qml
         qml/WizardChoiceCard.qml
-        qml/WizardAccentPicker.qml
+        qml/WizardThemePreview.qml
+        qml/WizardLogo.qml
         qml/WizardPicker.qml
         qml/WelcomePage.qml
         qml/LanguagePage.qml

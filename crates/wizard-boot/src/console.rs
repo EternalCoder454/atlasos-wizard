@@ -188,16 +188,19 @@ impl Console for Tty {
     }
 
     fn ask_secret(&mut self, prompt: &str) -> Input {
-        self.print(prompt);
+        // Echo goes off before the prompt shows: what is typed the moment it
+        // appears is never echoed.
         let guard = match EchoOff::new() {
             Ok(g) => g,
             Err(e) => {
                 log::error!("cannot turn echo off on the terminal: {e}");
+                self.print(prompt);
                 self.print("\n");
                 self.say(crate::text::NO_ECHO_OFF);
                 return self.eof();
             }
         };
+        self.print(prompt);
         let input = self.read_line();
         drop(guard);
         // The Enter key was not echoed.

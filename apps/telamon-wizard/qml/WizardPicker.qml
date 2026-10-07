@@ -1,6 +1,5 @@
 import QtQuick
 import QtQuick.Layouts
-import org.kde.kirigami as Kirigami
 import Telamon.Ui
 
 // A filterable list: `items` is an array of {id, text, subtitle}; `currentId`
@@ -15,19 +14,23 @@ ColumnLayout {
     property bool loading: false
     signal picked(string id)
 
-    spacing: Kirigami.Units.smallSpacing
+    spacing: TelamonStyle.spacing
     Accessible.name: placeholder
 
     function _fill(): void {
         const f = filter.text.trim().toLowerCase();
-        model.clear();
+        rows.clear();
         let at = -1;
         for (const it of control.items) {
             if (f === "" || it.text.toLowerCase().indexOf(f) >= 0 || (it.subtitle ?? "").toLowerCase().indexOf(f) >= 0) {
                 if (it.id === control.currentId) {
-                    at = model.count;
+                    at = rows.count;
                 }
-                model.append({ rid: it.id, text: it.text, subtitle: it.subtitle ?? "" });
+                rows.append({
+                    rid: it.id,
+                    text: it.text,
+                    subtitle: it.subtitle ?? ""
+                });
             }
         }
         list.populating = true;
@@ -55,17 +58,20 @@ ColumnLayout {
         id: list
         Layout.fillWidth: true
         Layout.fillHeight: true
-        Layout.minimumHeight: Kirigami.Units.gridUnit * 8
+        Layout.minimumHeight: TelamonStyle.rowHeight * 4
         property bool populating: false
         subtitleRole: "subtitle"
-        placeholderText: control.loading ? qsTr("Loading…") : control.emptyText
         Accessible.name: control.placeholder
+        status: control.loading ? TelamonStatus.Loading : (rows.count === 0 ? (filter.text !== "" ? TelamonStatus.NoResults : TelamonStatus.Empty) : TelamonStatus.Ready)
+        statusText: rows.count === 0 && !control.loading && filter.text !== "" ? control.emptyText : ""
         model: ListModel {
-            id: model
+            id: rows
         }
-        onCurrentIndexChanged: {
-            if (!populating && currentIndex >= 0 && currentIndex < model.count) {
-                const id = model.get(currentIndex).rid;
+        // The selection, not `currentIndex`: that starts at 0, so a click on
+        // the first row changes nothing in it.
+        onSelectedIndexesChanged: {
+            if (!populating && selectedIndexes.length > 0 && selectedIndexes[0] < rows.count) {
+                const id = rows.get(selectedIndexes[0]).rid;
                 if (id !== control.currentId) {
                     control.picked(id);
                 }

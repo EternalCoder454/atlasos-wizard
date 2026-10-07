@@ -8,7 +8,6 @@ WizardPage {
     property string zone
     signal chosen(string id)
 
-    stepId: "timezone"
     title: qsTr("Time Zone")
     subtitle: qsTr("Choose where you are, so the clock is right.")
     skippable: errorText !== ""
@@ -32,7 +31,11 @@ WizardPage {
                 page.errorText = page.errorFor(code);
                 return;
             }
-            page.items = JSON.parse(page.backend.zonesJson).map(z => ({ id: z.id, text: z.id.replace(/_/g, " "), subtitle: z.comment }));
+            page.items = JSON.parse(page.backend.zonesJson).map(z => ({
+                        id: z.id,
+                        text: z.id.replace(/_/g, " "),
+                        subtitle: z.comment
+                    }));
         }
     }
 

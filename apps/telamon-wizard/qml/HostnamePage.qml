@@ -9,7 +9,6 @@ WizardPage {
     readonly property bool valid: /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(hostname)
     signal edited
 
-    stepId: "hostname"
     title: qsTr("Computer Name")
     subtitle: qsTr("This is how the computer appears on your network.")
     canAdvance: valid
@@ -26,6 +25,8 @@ WizardPage {
             page.hostname = text.toLowerCase();
             page.edited();
         }
+        onAccepted: if (page.valid)
+            page.submitted()
     }
     Item {
         Layout.fillHeight: true
