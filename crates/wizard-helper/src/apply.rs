@@ -226,7 +226,7 @@ pub fn apply(env: &Env<'_>, c: &Choices, tools: &dyn Tools) -> Result<(), Vec<St
         "crash-reporting.toml",
         ensure_dir_under(env.home, &crash_dir, 0o700)
             .and_then(|()| {
-                atlas_framework_system::crash::Settings {
+                telamon_framework_system::crash::Settings {
                     enabled: c.crash_reports,
                 }
                 .save_to(&crash_dir.join("crash-reporting.toml"))

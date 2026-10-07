@@ -27,8 +27,8 @@ default = []
 test-root = []
 
 [dependencies]
-atlas-framework-core.workspace = true
-atlas-framework-system = { workspace = true, features = ["polkit"] }
+telamon-framework-core.workspace = true
+telamon-framework-system = { workspace = true, features = ["polkit"] }
 libc.workspace = true
 log.workspace = true
 rustix.workspace = true

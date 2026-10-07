@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
-import Atlas.Ui
+import Telamon.Ui
 
 // A filterable list: `items` is an array of {id, text, subtitle}; `currentId`
 // is the chosen one; `picked(id)` fires when the user chooses.
@@ -42,7 +42,7 @@ ColumnLayout {
     onItemsChanged: _fill()
     onCurrentIdChanged: _fill()
 
-    AtlasTextField {
+    TelamonTextField {
         id: filter
         Layout.fillWidth: true
         placeholderText: control.placeholder
@@ -51,7 +51,7 @@ ColumnLayout {
         Accessible.name: control.placeholder
     }
 
-    AtlasListView {
+    TelamonListView {
         id: list
         Layout.fillWidth: true
         Layout.fillHeight: true

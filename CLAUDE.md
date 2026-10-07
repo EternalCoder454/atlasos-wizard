@@ -37,7 +37,7 @@ Updater's (`~/Documents/Projects/AtlasOS/Atlas Updater`,
   DESIGN.md's recovery table and a test.
 - **The GUI thread never blocks**: D-Bus and file work on a worker, results
   posted with `qt_thread().queue`.
-- **Atlas.Ui is the installed `atlas-ui` package.** Use its controls (never
+- **Telamon.Ui is the installed `telamon-ui` package.** Use its controls (never
   QQC2 or Kirigami buttons); what it lacks is asked of the framework. A local
   stand-in is named `Wizard<Name>` so it never clashes (`check-app-names.sh`).
 - Commit only the paths you own (`git commit -- <paths>`), as
@@ -61,7 +61,7 @@ Updater's (`~/Documents/Projects/AtlasOS/Atlas Updater`,
 `scripts/dev.sh` builds `localhost/atlas-wizard-dev:44` from `ci/Containerfile`
 (the one list of packages; CI runs in the same file's `ci` target, published
 as `ghcr.io/eternalcoder454/atlas-wizard-dev` by `dev-image.yml`). It builds
-atlas-ui and atlas-symbols-fonts from the atlas-framework tag in `Cargo.toml`
+telamon-ui and telamon-symbols-fonts from the atlas-framework tag in `Cargo.toml`
 (needs network), and rebuilds by itself when the Containerfile, the spec's
 BuildRequires or that tag change (`ci/image-tag.sh`).
 `ATLAS_FRAMEWORK_REF=<tag or branch>` builds against another framework ref.
@@ -74,8 +74,8 @@ Lint, Tests and RPM rows above plus qmllint, shellcheck and
 
 ## Moving the atlas-framework pin
 
-Change `tag` in `Cargo.toml`, then `scripts/dev.sh cargo update -p atlas-framework-ui -p atlas-framework-system`.
+Change `tag` in `Cargo.toml`, then `scripts/dev.sh cargo update -p telamon-framework-ui -p telamon-framework-system`.
 CI and the dev image follow the tag by themselves (`ci/framework-ref.sh`).
 When the app uses
-something new in Atlas.Ui, `ui:` in `apps/atlas-wizard/src/lib.rs` and
-`atlas-ui >=` in the spec (Requires and BuildRequires) together.
+something new in Telamon.Ui, `ui:` in `apps/atlas-wizard/src/lib.rs` and
+`telamon-ui >=` in the spec (Requires and BuildRequires) together.

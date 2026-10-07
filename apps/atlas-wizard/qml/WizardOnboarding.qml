@@ -2,9 +2,9 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
-import Atlas.Ui
+import Telamon.Ui
 
-// Stand-in for Atlas.Ui 1.5.0's AtlasOnboarding additions (same API):
+// Stand-in for Telamon.Ui 1.5.0's TelamonOnboarding additions (same API):
 // nextText/finishText/backText, busy, autoAdvance + advanceRequested(index),
 // canGoBack, stepStyle. Local extra: a page with `hidden: true` is left out
 // of the steps and of Back/Next.
@@ -138,7 +138,7 @@ Item {
         radius: Kirigami.Units.cornerRadius * 2
         color: Kirigami.Theme.backgroundColor
         border.width: 1
-        border.color: AtlasStyle.separator
+        border.color: TelamonStyle.separator
 
         RowLayout {
             anchors.fill: parent
@@ -188,10 +188,10 @@ Item {
                             width: current ? Kirigami.Units.gridUnit * 1.4 : Kirigami.Units.gridUnit * 0.5
                             height: Kirigami.Units.gridUnit * 0.5
                             radius: height / 2
-                            color: current ? AtlasStyle.accent : (index < control.position ? Qt.alpha(AtlasStyle.accent, 0.45) : Qt.alpha(Kirigami.Theme.textColor, 0.2))
+                            color: current ? TelamonStyle.accent : (index < control.position ? Qt.alpha(TelamonStyle.accent, 0.45) : Qt.alpha(Kirigami.Theme.textColor, 0.2))
                             Behavior on width {
                                 NumberAnimation {
-                                    duration: AtlasStyle.duration
+                                    duration: TelamonStyle.duration
                                 }
                             }
                         }
@@ -209,14 +209,14 @@ Item {
                         property: "opacity"
                         from: 0
                         to: 1
-                        duration: AtlasStyle.duration
+                        duration: TelamonStyle.duration
                     }
                 }
 
                 Rectangle {
                     Layout.fillWidth: true
                     implicitHeight: 1
-                    color: AtlasStyle.separator
+                    color: TelamonStyle.separator
                 }
 
                 RowLayout {

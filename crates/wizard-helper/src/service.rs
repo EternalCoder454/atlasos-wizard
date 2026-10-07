@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-use atlas_framework_system::polkit::{self, Denied};
+use telamon_framework_system::polkit::{self, Denied};
 use wizard_core::accounts::parse_passwd;
 use wizard_core::choices::Value as Choice;
 use zbus::message::Header;

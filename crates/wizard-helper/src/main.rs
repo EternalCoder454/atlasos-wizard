@@ -5,7 +5,7 @@
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use atlas_framework_core::app_info;
+use telamon_framework_core::app_info;
 use wizard_helper::paths::Paths;
 use wizard_helper::service::{Service, serve};
 use wizard_helper::{apply, system_core};
@@ -17,7 +17,7 @@ fn main() -> ExitCode {
         repo: "atlasos-wizard",
     };
     // journal identifier: atlas-wizard-helper (stderr without a journal)
-    atlas_framework_core::log::init(&app);
+    telamon_framework_core::log::init(&app);
 
     // No core dump, and no ptrace by the user's processes: the helper holds
     // the password for a moment (see DESIGN.md, "The helper"), and zbus's own

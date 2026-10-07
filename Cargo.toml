@@ -11,11 +11,11 @@ rust-version = "1.89"
 
 [workspace.dependencies]
 # The atlas-framework crates (startup, settings, logging, crash reports,
-# polkit); to move the pin, see CLAUDE.md. Atlas.Ui is not pinned here: it is
-# the installed atlas-ui package.
-atlas-framework-ui = { git = "https://github.com/EternalCoder454/atlas-framework", tag = "v1.6.0" }
-atlas-framework-core = { git = "https://github.com/EternalCoder454/atlas-framework", tag = "v1.6.0" }
-atlas-framework-system = { git = "https://github.com/EternalCoder454/atlas-framework", tag = "v1.6.0" }
+# polkit); to move the pin, see CLAUDE.md. Telamon.Ui is not pinned here: it is
+# the installed telamon-ui package.
+telamon-framework-ui = { git = "https://github.com/EternalCoder454/atlas-framework", tag = "v2.0.0" }
+telamon-framework-core = { git = "https://github.com/EternalCoder454/atlas-framework", tag = "v2.0.0" }
+telamon-framework-system = { git = "https://github.com/EternalCoder454/atlas-framework", tag = "v2.0.0" }
 libc = "0.2"
 log = { version = "0.4", features = ["std"] }
 # process: safe killpg for the helper's children

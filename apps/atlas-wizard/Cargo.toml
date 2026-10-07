@@ -15,7 +15,7 @@ name = "atlas_wizard"
 crate-type = ["staticlib", "rlib"]
 
 [dependencies]
-atlas-framework-ui.workspace = true
+telamon-framework-ui.workspace = true
 wizard-core.workspace = true
 cxx = "1"
 cxx-qt = "0.10"

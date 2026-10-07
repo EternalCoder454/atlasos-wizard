@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
-import Atlas.Ui
+import Telamon.Ui
 
 WizardPage {
     id: page
@@ -74,9 +74,9 @@ WizardPage {
     }
     RowLayout {
         Layout.fillWidth: true
-        AtlasLabel {
+        TelamonLabel {
             Layout.fillWidth: true
-            textStyle: AtlasLabel.Heading
+            textStyle: TelamonLabel.Heading
             text: qsTr("Available Networks")
         }
         SecondaryButton {
@@ -85,7 +85,7 @@ WizardPage {
             onClicked: page.scan()
         }
     }
-    AtlasListView {
+    TelamonListView {
         Layout.fillWidth: true
         Layout.fillHeight: true
         Layout.minimumHeight: Kirigami.Units.gridUnit * 6
@@ -97,14 +97,14 @@ WizardPage {
         model: page.networks.map(n => ({ ssid: n.ssid, info: (n.secure ? qsTr("Secured") : qsTr("Open")) + " · " + qsTr("%1% signal").arg(n.strength) }))
         onCurrentIndexChanged: page.selected = currentIndex
     }
-    AtlasTextField {
+    TelamonTextField {
         id: hiddenSsid
         Layout.fillWidth: true
         visible: page.hiddenNetwork
         placeholderText: qsTr("Network Name")
         maximumLength: 32
     }
-    AtlasPasswordField {
+    TelamonPasswordField {
         id: pass
         Layout.fillWidth: true
         visible: page.hiddenNetwork || (page.current !== null && page.current.secure)
@@ -113,7 +113,7 @@ WizardPage {
     }
     RowLayout {
         Layout.fillWidth: true
-        AtlasCheckBox {
+        TelamonCheckBox {
             text: qsTr("Hidden Network")
             checked: page.hiddenNetwork
             onToggled: page.hiddenNetwork = checked

@@ -1,6 +1,6 @@
 //! `atlas-wizard-boot prepare | fallback`; see the library for what they do.
 
-use atlas_framework_core::AppInfo;
+use telamon_framework_core::AppInfo;
 use std::process::ExitCode;
 use wizard_boot::cmd::{Runner, SystemRunner};
 use wizard_boot::console::Tty;
@@ -26,7 +26,7 @@ fn runner(paths: &Paths) -> Box<dyn Runner> {
 
 fn main() -> ExitCode {
     // The journal identifier is `atlas-wizard-boot` (from the id below).
-    atlas_framework_core::log::init(&AppInfo {
+    telamon_framework_core::log::init(&AppInfo {
         name: "Atlas Wizard Boot".into(),
         id: "net.eterneon.atlas.wizard-boot".into(),
         version: env!("CARGO_PKG_VERSION").into(),

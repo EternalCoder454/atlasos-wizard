@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
-import Atlas.Ui
+import Telamon.Ui
 
 WizardPage {
     id: page
@@ -15,7 +15,7 @@ WizardPage {
     canAdvance: valid
     skippable: errorText !== ""
 
-    AtlasTextField {
+    TelamonTextField {
         Layout.fillWidth: true
         placeholderText: qsTr("Computer Name")
         text: page.hostname

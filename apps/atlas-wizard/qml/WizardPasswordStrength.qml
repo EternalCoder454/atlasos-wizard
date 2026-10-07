@@ -2,9 +2,9 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
-import Atlas.Ui
+import Telamon.Ui
 
-// Stand-in for AtlasPasswordStrength (Atlas.Ui 1.5.0): `score` 0 to 4, -1 for
+// Stand-in for TelamonPasswordStrength (Telamon.Ui 1.5.0): `score` 0 to 4, -1 for
 // nothing typed (empty bar, no label); `text` empty for the built-in label.
 RowLayout {
     id: control
@@ -31,9 +31,9 @@ RowLayout {
             color: control.score >= 0 && seg.index < Math.max(1, control.score) ? control.tint : Qt.alpha(Kirigami.Theme.textColor, 0.15)
         }
     }
-    AtlasLabel {
+    TelamonLabel {
         Layout.preferredWidth: Kirigami.Units.gridUnit * 5
-        textStyle: AtlasLabel.Caption
+        textStyle: TelamonLabel.Caption
         text: control.label
     }
 }

@@ -104,7 +104,7 @@ interface `net.eterneon.atlas.WizardHelper1`. Every method:
   sender, from the bus, not an argument) before anything else: a call from
   another uid does no work, asks polkit nothing and does not reset the idle
   timer; refusals are logged at most once a second, with a count of the rest;
-- then authorizes the caller with `atlas_framework_system::polkit::check`
+- then authorizes the caller with `telamon_framework_system::polkit::check`
   against its own action (non-interactive);
 - refuses with `net.eterneon.atlas.Error.SetupDone` once `/etc/atlasos/setup-done`
   exists (`CreateAccount`, `Finish` and `GiveUp`; `EndSetup` runs after the
@@ -305,21 +305,21 @@ Appearance, Privacy, Finish. First login: Fingerprint, PIN.
 
 Look: as the patched plasma-setup (welcome with the AtlasOS logo, a card with
 a shadow, big bold titles, step dots, the step forward in the accent colour),
-built from Atlas.Ui: `AtlasWindow` full screen with no close, `AtlasOnboarding`,
-`AtlasTextField`, `AtlasPasswordField`, `AtlasComboBox`, `AtlasSwitch`,
+built from Telamon.Ui: `TelamonWindow` full screen with no close, `TelamonOnboarding`,
+`TelamonTextField`, `TelamonPasswordField`, `TelamonComboBox`, `TelamonSwitch`,
 `Section`/`SectionRow`, `PrimaryButton`/`SecondaryButton`, `StatusHero`.
-What Atlas.Ui lacks is asked of the framework; until then a local copy has a
-`Wizard` prefix so it never clashes with an Atlas.Ui type. Atlas.Ui 1.5.0
+What Telamon.Ui lacks is asked of the framework; until then a local copy has a
+`Wizard` prefix so it never clashes with a Telamon.Ui type. Telamon.Ui 1.5.0
 will have them (framework ROADMAP item 42), so each stand-in mirrors the
 1.5.0 API exactly and moving to it is a rename:
 
-| Stand-in (0.1.0, on 1.4.0) | Atlas.Ui 1.5.0 | API to mirror |
+| Stand-in (0.1.0, on 1.4.0) | Telamon.Ui 1.5.0 | API to mirror |
 |---|---|---|
-| `WizardOnboarding` | `AtlasOnboarding` additions | `nextText`, `finishText`, `backText` (empty = built-in); `busy` (Next shows a spinner and ignores input, Back and Skip disabled, `Accessible.description` "Busy"); `autoAdvance` (default true) and `advanceRequested(int index)` on every Next, the app calls `next()` itself when false; `canGoBack` (default true; false hides Back, Alt+Left does nothing); `stepStyle: Column \| Dots` (current dot wider in accent, past accent 45 %, future text 20 %, width animation off under reduced motion) |
-| `WizardPasswordStrength` | `AtlasPasswordStrength` | `score` 0–4, -1 = nothing typed (empty bar, no label); `text` (empty = "Very Weak" … "Strong"); accessible value "<label>, <score> of 4" |
-| `WizardChoiceCard` | `AtlasChoiceCard` | AbstractButton, checkable; `source`, `text`, `checked`, `aspectRatio` (1.6); check circle, checked ring, hover ring |
-| `WizardAccentPicker` | `AtlasAccentPicker` | `model` (colours or `{color, name}`), `currentIndex`, `currentColor` (read-only), `activated(int)`; arrows, Home/End; accessible name = name or "Accent color N" |
-| `onClosing: close.accepted = false` + `visibility: Window.FullScreen` | `AtlasWindow.kiosk` | full screen, no close, close requests refused |
+| `WizardOnboarding` | `TelamonOnboarding` additions | `nextText`, `finishText`, `backText` (empty = built-in); `busy` (Next shows a spinner and ignores input, Back and Skip disabled, `Accessible.description` "Busy"); `autoAdvance` (default true) and `advanceRequested(int index)` on every Next, the app calls `next()` itself when false; `canGoBack` (default true; false hides Back, Alt+Left does nothing); `stepStyle: Column \| Dots` (current dot wider in accent, past accent 45 %, future text 20 %, width animation off under reduced motion) |
+| `WizardPasswordStrength` | `TelamonPasswordStrength` | `score` 0–4, -1 = nothing typed (empty bar, no label); `text` (empty = "Very Weak" … "Strong"); accessible value "<label>, <score> of 4" |
+| `WizardChoiceCard` | `TelamonChoiceCard` | AbstractButton, checkable; `source`, `text`, `checked`, `aspectRatio` (1.6); check circle, checked ring, hover ring |
+| `WizardAccentPicker` | `TelamonAccentPicker` | `model` (colours or `{color, name}`), `currentIndex`, `currentColor` (read-only), `activated(int)`; arrows, Home/End; accessible name = name or "Accent color N" |
+| `onClosing: close.accepted = false` + `visibility: Window.FullScreen` | `TelamonWindow.kiosk` | full screen, no close, close requests refused |
 
 ## Threading and errors
 

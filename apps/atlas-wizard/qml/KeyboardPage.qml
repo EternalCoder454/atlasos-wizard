@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
-import Atlas.Ui
+import Telamon.Ui
 
 WizardPage {
     id: page
@@ -57,7 +57,7 @@ WizardPage {
         placeholder: qsTr("Search Layouts")
         onPicked: id => page.chosen(id, "")
     }
-    AtlasComboBox {
+    TelamonComboBox {
         Layout.fillWidth: true
         visible: page.variants.length > 0
         Accessible.name: qsTr("Variant")

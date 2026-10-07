@@ -160,7 +160,7 @@ pub mod qobject {
 
     impl cxx_qt::Threading for Backend {}
 
-    // Lets Rust create the object (see `atlas_backend_new` in lib.rs).
+    // Lets Rust create the object (see `telamon_backend_new` in lib.rs).
     #[namespace = "rust::cxxqtlib1"]
     unsafe extern "C++" {
         include!("cxx-qt-lib/common.h");

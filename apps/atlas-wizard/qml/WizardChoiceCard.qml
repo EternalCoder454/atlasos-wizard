@@ -2,9 +2,9 @@ import QtQuick
 import QtQuick.Controls as QQC2
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
-import Atlas.Ui
+import Telamon.Ui
 
-// Stand-in for AtlasChoiceCard (Atlas.Ui 1.5.0): a checkable AbstractButton
+// Stand-in for TelamonChoiceCard (Telamon.Ui 1.5.0): a checkable AbstractButton
 // with a picture (`source`, or items declared inside as a preview), a label,
 // a check circle, a checked ring and a hover ring.
 QQC2.AbstractButton {
@@ -26,7 +26,7 @@ QQC2.AbstractButton {
         radius: Kirigami.Units.cornerRadius
         color: "transparent"
         border.width: control.checked ? 3 : (control.hovered || control.visualFocus ? 2 : 1)
-        border.color: control.checked ? AtlasStyle.accent : (control.hovered || control.visualFocus ? Qt.alpha(AtlasStyle.accent, 0.5) : AtlasStyle.separator)
+        border.color: control.checked ? TelamonStyle.accent : (control.hovered || control.visualFocus ? Qt.alpha(TelamonStyle.accent, 0.5) : TelamonStyle.separator)
     }
     contentItem: ColumnLayout {
         spacing: Kirigami.Units.smallSpacing
@@ -48,23 +48,23 @@ QQC2.AbstractButton {
                 anchors.top: parent.top
                 anchors.right: parent.right
                 anchors.margins: Kirigami.Units.smallSpacing
-                color: control.checked ? AtlasStyle.accent : Qt.alpha(Kirigami.Theme.backgroundColor, 0.7)
+                color: control.checked ? TelamonStyle.accent : Qt.alpha(Kirigami.Theme.backgroundColor, 0.7)
                 border.width: 1
-                border.color: control.checked ? AtlasStyle.accent : AtlasStyle.separator
+                border.color: control.checked ? TelamonStyle.accent : TelamonStyle.separator
                 Kirigami.Icon {
                     anchors.centerIn: parent
                     width: parent.width * 0.7
                     height: width
                     source: "emblem-ok-symbolic"
-                    color: "white" // atlas-lint: allow-raw
+                    color: "white" // telamon-lint: allow-raw
                     visible: control.checked
                 }
             }
         }
-        AtlasLabel {
+        TelamonLabel {
             id: label
             Layout.alignment: Qt.AlignHCenter
-            textStyle: AtlasLabel.Heading
+            textStyle: TelamonLabel.Heading
             text: control.text
         }
     }

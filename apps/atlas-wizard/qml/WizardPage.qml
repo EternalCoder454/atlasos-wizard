@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
-import Atlas.Ui
+import Telamon.Ui
 
 // One page of the wizard. WizardOnboarding reads `title`, `canAdvance`,
 // `skippable` and `hidden` from it. Children go in the body column.
@@ -28,19 +28,19 @@ Item {
         anchors.fill: parent
         spacing: Kirigami.Units.largeSpacing
 
-        AtlasLabel {
+        TelamonLabel {
             Layout.fillWidth: true
-            textStyle: AtlasLabel.Title
+            textStyle: TelamonLabel.Title
             text: page.title
             wrapMode: Text.WordWrap
             Accessible.role: Accessible.Heading
         }
-        AtlasLabel {
+        TelamonLabel {
             Layout.fillWidth: true
             visible: page.subtitle !== ""
             text: page.subtitle
             wrapMode: Text.WordWrap
-            color: AtlasStyle.textMuted
+            color: TelamonStyle.textMuted
         }
         InfoBanner {
             Layout.fillWidth: true

@@ -1,11 +1,11 @@
 import QtQuick
 import org.kde.kirigami as Kirigami
-import Atlas.Ui
+import Telamon.Ui
 
-AtlasWindow {
+TelamonWindow {
     id: root
 
-    // The Rust backend; atlas_app_run sets it.
+    // The Rust backend; telamon_app_run sets it.
     required property var backend
 
     property var answers: ({})
@@ -15,8 +15,8 @@ AtlasWindow {
     // Whose answer the Next button is waiting for: "language", "account", ...
     property string waitingFor: ""
 
-    title: AtlasApp.name
-    // Full screen, no close: the stand-in for AtlasWindow.kiosk (Atlas.Ui 1.5.0).
+    title: TelamonApp.name
+    // Full screen, no close: the stand-in for TelamonWindow.kiosk (Telamon.Ui 1.5.0).
     x: 0
     y: 0
     width: Screen.width
@@ -165,7 +165,7 @@ AtlasWindow {
         visible: root.backend.welcomeMode
     }
 
-    AtlasLabel {
+    TelamonLabel {
         anchors.centerIn: parent
         visible: !root.backend.welcomeMode && !root.started
         text: qsTr("Starting…")
@@ -292,7 +292,7 @@ AtlasWindow {
         }
         AppearancePage {
             look: root.answers.look ?? "light"
-            accent: root.answers.accent ?? "#6858E2" // atlas-lint: allow-raw
+            accent: root.answers.accent ?? "#6858E2" // telamon-lint: allow-raw
             onEdited: root.setAnswers({ look: look, accent: accent })
         }
         PrivacyPage {

@@ -1,19 +1,19 @@
-// The framework starts the app (atlas-framework-ui, include/atlas/app.h): Qt,
+// The framework starts the app (telamon-framework-ui, include/telamon/app.h): Qt,
 // the app ID and names, one instance per session, logging and crash hooks.
 // Then it loads the QML module's Main with the Rust backend. All app logic is
 // in Rust (src/); this file only glues.
 
 // Defined in src/lib.rs.
-extern "C" void *atlas_backend_new();
-// atlas-framework-ui (include/atlas/app.h), linked in with the Rust library;
+extern "C" void *telamon_backend_new();
+// telamon-framework-ui (include/telamon/app.h), linked in with the Rust library;
 // declared here as that header's comment allows.
-extern "C" int atlas_app_run(int argc, char *argv[], const char *qmlModule, const char *qmlType, void *(*makeBackend)());
+extern "C" int telamon_app_run(int argc, char *argv[], const char *qmlModule, const char *qmlType, void *(*makeBackend)());
 
 #include <QGuiApplication>
 #include <QFont>
 
 // Sets the application font to its first-seen size times `scale`. Kirigami's
-// and Atlas.Ui's sizes come from the application font, so they follow.
+// and Telamon.Ui's sizes come from the application font, so they follow.
 extern "C" void atlas_set_text_scale(double scale)
 {
     static const qreal base = QGuiApplication::font().pointSizeF();
@@ -24,5 +24,5 @@ extern "C" void atlas_set_text_scale(double scale)
 
 int main(int argc, char *argv[])
 {
-    return atlas_app_run(argc, argv, "net.eterneon.atlas.wizard", "Main", atlas_backend_new);
+    return telamon_app_run(argc, argv, "net.eterneon.atlas.wizard", "Main", telamon_backend_new);
 }

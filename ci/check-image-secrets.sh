@@ -182,8 +182,8 @@ set +e
         [ -e "$d" ] && dirs+=("$d")
     done
     found "build paths" -ra "${dirs[@]}"
-    if ! rpm -q atlas-ui atlas-symbols-fonts >/dev/null; then
-        echo "atlas-ui or atlas-symbols-fonts is not installed"; rc=1
+    if ! rpm -q telamon-ui telamon-symbols-fonts >/dev/null; then
+        echo "telamon-ui or telamon-symbols-fonts is not installed"; rc=1
     fi
     if ! pkgs=$(rpm -qa --qf "%{NAME}\n" "atlas-*"); then
         echo "cannot list the atlas-* packages"; rc=1

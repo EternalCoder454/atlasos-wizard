@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
-import Atlas.Ui
+import Telamon.Ui
 
 WizardPage {
     id: page
@@ -55,7 +55,7 @@ WizardPage {
     onUserNameChanged: _recheck()
     Component.onCompleted: _recheck()
 
-    AtlasTextField {
+    TelamonTextField {
         id: full
         Layout.fillWidth: true
         placeholderText: qsTr("Full Name")
@@ -70,7 +70,7 @@ WizardPage {
             page.edited();
         }
     }
-    AtlasTextField {
+    TelamonTextField {
         id: user
         Layout.fillWidth: true
         placeholderText: qsTr("User Name")
@@ -83,7 +83,7 @@ WizardPage {
             page.edited();
         }
     }
-    AtlasPasswordField {
+    TelamonPasswordField {
         id: pass
         Layout.fillWidth: true
         placeholderText: qsTr("Password")
@@ -98,13 +98,13 @@ WizardPage {
         Layout.fillWidth: true
         score: pass.text === "" ? -1 : page.score
     }
-    AtlasPasswordField {
+    TelamonPasswordField {
         id: confirm
         Layout.fillWidth: true
         placeholderText: qsTr("Confirm Password")
         errorText: text !== "" && !page.confirmed ? qsTr("The passwords don't match.") : ""
     }
-    AtlasCheckBox {
+    TelamonCheckBox {
         text: qsTr("Sign in automatically")
         checked: page.autologin
         onToggled: {

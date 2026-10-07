@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
-import Atlas.Ui
+import Telamon.Ui
 
 WizardPage {
     id: page

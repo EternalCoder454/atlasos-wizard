@@ -1,9 +1,9 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import org.kde.kirigami as Kirigami
-import Atlas.Ui
+import Telamon.Ui
 
-// Stand-in for AtlasAccentPicker (Atlas.Ui 1.5.0): `model` is colours or
+// Stand-in for TelamonAccentPicker (Telamon.Ui 1.5.0): `model` is colours or
 // `{color, name}`; `currentIndex`, read-only `currentColor`, `activated(int)`;
 // arrows, Home and End move. Accessible name: the name or "Accent color N".
 FocusScope {
@@ -68,7 +68,7 @@ FocusScope {
                     width: parent.width * 0.35
                     height: width
                     radius: width / 2
-                    color: "white" // atlas-lint: allow-raw
+                    color: "white" // telamon-lint: allow-raw
                     visible: swatch.current
                 }
                 Rectangle {
@@ -77,7 +77,7 @@ FocusScope {
                     radius: width / 2
                     color: "transparent"
                     border.width: 2
-                    border.color: AtlasStyle.accent
+                    border.color: TelamonStyle.accent
                     visible: control.activeFocus && swatch.current
                 }
                 Accessible.role: Accessible.RadioButton
