@@ -11,9 +11,9 @@ pub const ACCENTS: [&str; 9] = [
 ];
 
 /// Global Theme id of the light look.
-pub const THEME_LIGHT: &str = "org.atlasos.desktop";
+pub const THEME_LIGHT: &str = "org.telamon.desktop";
 /// Global Theme id of the dark look.
-pub const THEME_DARK: &str = "org.atlasos.dark.desktop";
+pub const THEME_DARK: &str = "org.telamon.dark.desktop";
 
 /// A value of the choices map, simple enough for the helper to map zbus
 /// values into it.
@@ -270,7 +270,7 @@ mod tests {
             ("keyboard", kb),
         ]))
         .unwrap();
-        assert_eq!(c.look.theme_id(), "org.atlasos.dark.desktop");
+        assert_eq!(c.look.theme_id(), "org.telamon.dark.desktop");
         assert_eq!(c.accent, "#1D99F3");
         assert_eq!(c.text_scale.factor(), 1.25);
         assert!(c.high_contrast && c.screen_reader && c.crash_reports);
@@ -281,7 +281,7 @@ mod tests {
                 variant: "dvorak".into()
             })
         );
-        assert_eq!(Look::Light.theme_id(), "org.atlasos.desktop");
+        assert_eq!(Look::Light.theme_id(), "org.telamon.desktop");
     }
 
     #[test]

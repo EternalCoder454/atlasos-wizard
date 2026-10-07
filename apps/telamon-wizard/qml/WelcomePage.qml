@@ -20,7 +20,7 @@ WizardPage {
         Layout.alignment: Qt.AlignHCenter
         Layout.preferredWidth: Kirigami.Units.iconSizes.enormous
         Layout.preferredHeight: Kirigami.Units.iconSizes.enormous
-        source: "atlasos"
+        source: "telamon"
         fallback: "distributor-logo"
     }
     Section {

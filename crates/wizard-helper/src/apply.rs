@@ -484,7 +484,7 @@ toolBarFont=Noto Sans,9,-1,5,400,0,0,0,0,0,0,0,0,0,0,1\nsmallestReadableFont=Not
                         .into_owned(),
                     vec![
                         "--apply".to_string(),
-                        "org.atlasos.dark.desktop".to_string()
+                        "org.telamon.dark.desktop".to_string()
                     ]
                 ),
                 (

@@ -646,7 +646,7 @@ async fn full_flow_create_finish_end() {
             .to_string()
     };
     let l = tool("plasma-apply-lookandfeel");
-    assert!(l.contains("|--apply org.atlasos.dark.desktop|"), "{l}");
+    assert!(l.contains("|--apply org.telamon.dark.desktop|"), "{l}");
     let a = tool("plasma-apply-colorscheme");
     assert!(a.contains("|--accent-color #E93A9A|"), "{a}");
     for line in [&l, &a] {
