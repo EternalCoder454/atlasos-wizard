@@ -830,7 +830,7 @@ dependencies = [
 
 [[package]]
 name = "telamon-wizard"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "cxx",
  "cxx-qt",
@@ -1149,7 +1149,7 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
 name = "wizard-boot"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "libc",
  "log",
@@ -1164,7 +1164,7 @@ dependencies = [
 
 [[package]]
 name = "wizard-core"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "log",
  "serde",
@@ -1175,7 +1175,7 @@ dependencies = [
 
 [[package]]
 name = "wizard-helper"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "libc",
  "log",
