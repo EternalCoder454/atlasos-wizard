@@ -5,7 +5,7 @@
 %global debug_package %{nil}
 
 Name:           telamon-wizard
-Version:        0.2.1
+Version:        0.2.2
 Release:        1%{?dist}
 Summary:        Telamon Setup, the first-run wizard of Telamon OS
 License:        MIT
@@ -257,6 +257,11 @@ done
 # files when it is removed. /etc/telamon and /etc/atlasos are made by tmpfiles.d.
 
 %changelog
+* Thu Oct 08 2026 EternalHell <77252745+EternalCoder454@users.noreply.github.com> - 0.2.2-1
+- Fix: icons drawn over dialogs, popups and menus. With Qt Quick's software renderer a Kirigami.Icon was
+  painted again over what sat in front of it whenever a repaint touched a part of it; the app's icons are
+  layers on that renderer now.
+
 * Wed Oct 07 2026 EternalHell <77252745+EternalCoder454@users.noreply.github.com> - 0.2.1-1
 - The Light and Dark examples are drawn miniatures of the Telamon OS desktop
   that follow the accent colour, with a check mark and focus ring.
