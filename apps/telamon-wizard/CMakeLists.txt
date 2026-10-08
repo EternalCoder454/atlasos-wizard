@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(telamon-wizard VERSION 0.2.1 LANGUAGES CXX)
+project(telamon-wizard VERSION 0.2.2 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -44,6 +44,7 @@ qt_add_qml_module(telamon-wizard-app
     QML_FILES
         qml/Main.qml
         qml/ErrorText.qml
+        qml/WizardIcon.qml
         qml/WizardPage.qml
         qml/WizardOnboarding.qml
         qml/WizardStep.qml
