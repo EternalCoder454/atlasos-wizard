@@ -17,12 +17,15 @@ image=localhost/telamon-wizard-dev:44
 pinned=$("$repo/ci/framework-ref.sh")
 ref=${TELAMON_FRAMEWORK_REF:-$pinned}
 want=$("$repo/ci/image-tag.sh")
-[ "$ref" = "$pinned" ] || want=$want-$ref
+# the commit Cargo.lock locks the pinned tag to; another ref is not checked
+sha=$("$repo/ci/framework-sha.sh")
+[ "$ref" = "$pinned" ] || { want=$want-$ref; sha=; }
 
 have=$(podman image inspect --format '{{ index .Labels "net.eterneon.telamon.wizard.image-tag" }}' "$image" 2>/dev/null || true)
 if [ "$have" != "$want" ]; then
     podman build -f "$repo/ci/Containerfile" --target dev \
         --build-arg TELAMON_FRAMEWORK_REF="$ref" --build-arg IMAGE_TAG="$want" \
+        --build-arg TELAMON_FRAMEWORK_SHA="$sha" \
         -t "$image" "$repo" >&2
 fi
 

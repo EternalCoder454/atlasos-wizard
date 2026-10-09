@@ -22,6 +22,8 @@ BuildRequires:  rust
 BuildRequires:  rust-srpm-macros
 BuildRequires:  gcc
 BuildRequires:  gcc-c++
+# readelf, for scripts/check-hardening.sh in %%check
+BuildRequires:  binutils
 BuildRequires:  cmake
 BuildRequires:  ninja-build
 BuildRequires:  corrosion
@@ -182,15 +184,14 @@ if [ "$rc" != 1 ]; then
     echo "telamon-wizard holds the build path %{_builddir} (grep status $rc)" >&2
     exit 1
 fi
-# The test-root feature must not be in the shipped programs.
-for b in telamon-wizard-helper telamon-wizard-boot; do
-    rc=0
-    grep -qF TELAMON_WIZARD_TEST %{buildroot}%{_libexecdir}/$b || rc=$?
-    if [ "$rc" != 1 ]; then
-        echo "$b holds TELAMON_WIZARD_TEST (grep status $rc)" >&2
-        exit 1
-    fi
-done
+# The programs carry the hardening the build flags give them (position
+# independent, full RELRO and BIND_NOW, no executable stack, no RPATH, no text
+# relocations, stack protectors in the C++), and none of them has the tests'
+# hooks (the test-root feature: every TELAMON_WIZARD_TEST_* variable): readelf
+# and grep say, not the flags we meant. A failure fails the package build.
+scripts/check-hardening.sh --cxx --forbid-string TELAMON_WIZARD_TEST %{buildroot}%{_bindir}/telamon-wizard
+scripts/check-hardening.sh --forbid-string TELAMON_WIZARD_TEST \
+    %{buildroot}%{_libexecdir}/telamon-wizard-helper %{buildroot}%{_libexecdir}/telamon-wizard-boot
 desktop-file-validate %{buildroot}%{_datadir}/applications/net.eterneon.telamon.wizard.desktop
 desktop-file-validate %{buildroot}%{_datadir}/applications/net.eterneon.atlas.wizard.desktop
 # The old names reach the same programs and units.
