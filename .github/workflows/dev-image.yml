@@ -57,6 +57,7 @@ jobs:
       current: ${{ steps.cmp.outputs.current }}
       want: ${{ steps.cmp.outputs.want }}
       framework: ${{ steps.cmp.outputs.framework }}
+      framework_sha: ${{ steps.cmp.outputs.framework_sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -74,6 +75,7 @@ jobs:
           want=$(ci/image-tag.sh)
           echo "want=$want" >> "$GITHUB_OUTPUT"
           echo "framework=$(ci/framework-ref.sh)" >> "$GITHUB_OUTPUT"
+          echo "framework_sha=$(ci/framework-sha.sh)" >> "$GITHUB_OUTPUT"
           have=$(skopeo inspect --retry-times 3 --format "{{ index .Labels \"$LABEL\" }}" "docker://$IMAGE:44" 2>/dev/null || true)
           echo "published: '${have:-none}', wanted: '$want'"
           if [ "$have" = "$want" ] && [ "$FORCE" != true ]; then
@@ -100,9 +102,11 @@ jobs:
         env:
           WANT: ${{ needs.check.outputs.want }}
           FRAMEWORK: ${{ needs.check.outputs.framework }}
+          FRAMEWORK_SHA: ${{ needs.check.outputs.framework_sha }}
         run: |
           podman build -f ci/Containerfile --target ci \
             --build-arg "TELAMON_FRAMEWORK_REF=$FRAMEWORK" \
+            --build-arg "TELAMON_FRAMEWORK_SHA=$FRAMEWORK_SHA" \
             --build-arg "IMAGE_TAG=$WANT" \
             --label "org.opencontainers.image.revision=$GITHUB_SHA" \
             -t "$IMAGE:44" .
@@ -135,9 +139,11 @@ jobs:
         env:
           WANT: ${{ needs.check.outputs.want }}
           FRAMEWORK: ${{ needs.check.outputs.framework }}
+          FRAMEWORK_SHA: ${{ needs.check.outputs.framework_sha }}
         run: |
           podman build -f ci/Containerfile --target ci \
             --build-arg "TELAMON_FRAMEWORK_REF=$FRAMEWORK" \
+            --build-arg "TELAMON_FRAMEWORK_SHA=$FRAMEWORK_SHA" \
             --build-arg "IMAGE_TAG=$WANT" \
             -t "$IMAGE:44" .
           ci/check-image-secrets.sh "$IMAGE:44"

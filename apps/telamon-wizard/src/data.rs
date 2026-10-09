@@ -265,15 +265,18 @@ pub struct Zone {
     pub comment: String,
 }
 
-/// A zone id timedated may be given: `Area/City` characters only.
+/// A zone id timedated may be given: `Area/City` characters only, every
+/// part non-empty and starting with a letter (so no `//`, no trailing `/`,
+/// no part that is `-x` or a number).
 pub fn zone_id_ok(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 64
-        && !id.starts_with('/')
-        && !id.contains("..")
         && id
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '_' | '-' | '+'))
+        && id
+            .split('/')
+            .all(|part| part.chars().next().is_some_and(|c| c.is_ascii_alphabetic()))
 }
 
 /// Reads `zone1970.tab` (`CC[,CC]<TAB>coordinates<TAB>zone<TAB>comment`).
@@ -320,9 +323,13 @@ pub fn current_zone() -> Option<String> {
     zone_id_ok(id).then(|| id.to_string())
 }
 
-/// A host name hostnamed will take as a static name: one DNS label.
+/// A host name hostnamed will take as a static name: one DNS label (RFC
+/// 1123: lower-case ASCII letters, digits and `-`, 63 at most, not starting
+/// or ending with `-`), and not `localhost`, which is the name that asks for
+/// a real one.
 pub fn hostname_ok(s: &str) -> bool {
     !s.is_empty()
+        && s != "localhost"
         && s.len() <= 63
         && !s.starts_with('-')
         && !s.ends_with('-')
@@ -436,5 +443,160 @@ mod tests {
         );
         assert!(hostname_is_default("localhost.localdomain") && hostname_is_default("fedora"));
         assert!(!hostname_is_default("ada-pc"));
+    }
+}
+
+#[cfg(test)]
+mod props {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn text() -> impl Strategy<Value = String> {
+        prop_oneof![
+            3 => any::<String>(),
+            2 => prop::sample::select(vec![
+                "<layout><configItem><name>us</name><description>English</description></configItem>",
+                "</configItem>", "<variant>", "</variant>", "<name>", "</name>", "<!--", "-->",
+                "<description>", "</layout>", "<layout>", "&amp;", "&lt;", "<", ">", "x",
+            ]).prop_map(String::from),
+        ]
+    }
+
+    proptest! {
+        /// Hostnames: accepted ones are one lower-case DNS label.
+        #[test]
+        fn hostname_ok_accepts_only_one_label(s in any::<String>(), t in "[a-z0-9-]{0,70}") {
+            for s in [s, t] {
+                if hostname_ok(&s) {
+                    prop_assert!(!s.is_empty() && s.len() <= 63 && s != "localhost");
+                    prop_assert!(!s.starts_with('-') && !s.ends_with('-'));
+                    prop_assert!(s.bytes().all(|b| b.is_ascii_lowercase()
+                        || b.is_ascii_digit() || b == b'-'));
+                }
+            }
+        }
+
+        /// Zone ids: accepted ones cannot leave the zoneinfo directory or
+        /// look like an option, and every part is a name.
+        #[test]
+        fn zone_id_ok_accepts_only_zoneinfo_shaped_names(s in any::<String>(), t in "[A-Za-z0-9_+/.-]{0,70}") {
+            for s in [s, t] {
+                if zone_id_ok(&s) {
+                    prop_assert!(s.len() <= 64 && !s.starts_with('/') && !s.starts_with('-'));
+                    prop_assert!(!s.contains("..") && !s.contains("//") && !s.ends_with('/'));
+                    prop_assert!(s.split('/').all(|p| p.as_bytes()[0].is_ascii_alphabetic()));
+                }
+            }
+        }
+
+        /// Locale names the lists offer are short and made of safe characters.
+        #[test]
+        fn offered_locales_are_safe(s in any::<String>(), lines in prop::collection::vec(any::<String>(), 0..6)) {
+            if let Some(n) = norm_locale(&s) {
+                prop_assert!(locale_ok(&n));
+            }
+            for n in parse_supported(&lines.join("\n")) {
+                prop_assert!(locale_ok(&n) && n.len() <= 64);
+            }
+        }
+
+        /// The XML and tab readers never panic on any text and offer only
+        /// names that `set_keyboard` and `set_timezone` will take.
+        #[test]
+        fn lists_never_panic_and_offer_only_valid_names(t in prop::collection::vec(text(), 0..30)) {
+            let t = t.concat();
+            for l in parse_layouts(&t) {
+                prop_assert!(xkb_layout(&l.name));
+                prop_assert!(l.variants.iter().all(|v| xkb_variant(&v.name)));
+            }
+            for z in parse_zones(&t.replace(' ', "\t")) {
+                prop_assert!(zone_id_ok(&z.id), "{}", z.id);
+            }
+        }
+    }
+
+    proptest! {
+        /// The locale archive reader never panics on a header with any
+        /// fields followed by any bytes, and reads no more than its caps.
+        #[test]
+        fn locale_archive_reader_survives_any_bytes(
+            fields in prop::array::uniform8(any::<u32>()),
+            small in prop::array::uniform8(0u32..200),
+            tail in prop::collection::vec(any::<u8>(), 0..600),
+            use_small in any::<bool>(),
+        ) {
+            static RUNS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            if !crate::budget::within(&RUNS, 300) {
+                return Ok(());
+            }
+            let f = if use_small { small } else { fields };
+            let mut b = Vec::new();
+            for (i, v) in f.iter().enumerate() {
+                let v = if i == 0 { 0xde02_0109 } else { *v };
+                b.extend_from_slice(&v.to_le_bytes());
+            }
+            b.extend_from_slice(&tail);
+            let r = parse_locale_archive(&mut std::io::Cursor::new(b));
+            if let Ok(names) = r {
+                prop_assert!(names.iter().all(|n| locale_ok(n)));
+            }
+        }
+    }
+
+    #[test]
+    fn nasty_names() {
+        let big = "a".repeat(10 * 1024 * 1024);
+        for h in [
+            "",
+            "-a",
+            "a-",
+            "A",
+            "a.b",
+            "a b",
+            "a\nb",
+            "a\0b",
+            "localhost",
+            "ada_pc",
+            "é",
+            "../x",
+            "-rf",
+            "--help",
+            "a/b",
+            big.as_str(),
+            &"a".repeat(64),
+        ] {
+            assert!(!hostname_ok(h), "{:?}", &h[..h.len().min(20)]);
+        }
+        assert!(hostname_ok(&"a".repeat(63)) && hostname_ok("ada-pc") && hostname_ok("0"));
+        for z in [
+            "",
+            "/",
+            "/etc/passwd",
+            "../x",
+            "a/../b",
+            "a//b",
+            "a/",
+            "-x",
+            "Europe/-x",
+            "1/2",
+            "a b",
+            "a\nb",
+            "a\0b",
+            "Europe/Berlin\n",
+            big.as_str(),
+        ] {
+            assert!(!zone_id_ok(z), "{:?}", &z[..z.len().min(20)]);
+        }
+        for z in [
+            "UTC",
+            "Europe/Berlin",
+            "America/Port-au-Prince",
+            "Etc/GMT+5",
+            "America/Argentina/Buenos_Aires",
+        ] {
+            assert!(zone_id_ok(z), "{z}");
+        }
+        assert!(parse_layouts(&"<layout>".repeat(100_000)).is_empty());
+        assert_eq!(parse_zones(&"x\t\t../etc\n".repeat(100_000)).len(), 1);
     }
 }

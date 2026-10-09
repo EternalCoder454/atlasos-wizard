@@ -8,6 +8,9 @@
 #
 # Build context: the repo root (only packaging/telamon-wizard.spec is read).
 # TELAMON_FRAMEWORK_REF is the tag in Cargo.toml (ci/framework-ref.sh prints it).
+# TELAMON_FRAMEWORK_SHA is the commit Cargo.lock locks it to (ci/framework-sha.sh
+# prints it): the clone must be at that commit, because a tag can be moved. It
+# is empty only when a build uses another ref than the pinned one (dev.sh).
 # telamon-ui, which the app builds against, is in no repository: the first stage
 # builds atlas-framework's RPMs from that tag.
 
@@ -15,12 +18,15 @@ ARG FEDORA=registry.fedoraproject.org/fedora:44
 
 FROM ${FEDORA} AS framework
 ARG TELAMON_FRAMEWORK_REF
+ARG TELAMON_FRAMEWORK_SHA=
 RUN test -n "$TELAMON_FRAMEWORK_REF" || { echo "set --build-arg TELAMON_FRAMEWORK_REF=<tag>" >&2; exit 1; }
 RUN --mount=type=cache,target=/var/cache/libdnf5,sharing=locked \
     dnf -y --setopt=keepcache=1 install git-core tar gzip rpm-build dnf5-plugins
 # A tag or a branch, not a bare commit; build-rpm.sh packages HEAD.
 RUN git clone --quiet --depth 1 --branch "$TELAMON_FRAMEWORK_REF" \
         https://github.com/EternalCoder454/atlas-framework /framework
+RUN [ -z "$TELAMON_FRAMEWORK_SHA" ] || [ "$(git -C /framework rev-parse HEAD)" = "$TELAMON_FRAMEWORK_SHA" ] || \
+    { echo "atlas-framework $TELAMON_FRAMEWORK_REF is not at $TELAMON_FRAMEWORK_SHA (Cargo.lock): the tag moved" >&2; exit 1; }
 RUN --mount=type=cache,target=/var/cache/libdnf5,sharing=locked \
     /framework/packaging/build-rpm.sh /out
 RUN rm -rf /framework/.git
@@ -36,6 +42,7 @@ COPY packaging/telamon-wizard.spec /tmp/telamon-wizard.spec
 #   clippy, rustfmt      lint
 #   ShellCheck           lint of scripts/ and data/libexec/
 #   dbus-daemon, python3-dbusmock, accountsservice, polkit   helper bus tests
+#   nodejs               the polkit rule's test (tests/helper/polkit-rules.test.mjs)
 #   shadow-utils, passwd, util-linux, systemd                boot and helper tests
 #   cracklib-dicts       password strength tests (libpwquality's dictionary)
 #   Xvfb, qt6-qtbase-gui, kf6-qqc2-desktop-style             headless smoke run
@@ -43,7 +50,7 @@ COPY packaging/telamon-wizard.spec /tmp/telamon-wizard.spec
 RUN --mount=type=cache,target=/var/cache/libdnf5,sharing=locked \
     dnf -y --setopt=keepcache=1 install dnf5-plugins rpm-build git-core tar gzip zstd findutils \
         clippy rustfmt mold ccache ShellCheck desktop-file-utils \
-        dbus-daemon python3-dbusmock accountsservice polkit \
+        dbus-daemon python3-dbusmock accountsservice polkit nodejs \
         shadow-utils passwd util-linux systemd \
         libxcrypt-devel libpwquality-devel cracklib-dicts \
         xorg-x11-server-Xvfb qt6-qtbase-gui kf6-qqc2-desktop-style \

@@ -312,3 +312,103 @@ mod tests {
         assert_eq!(Reason::Missing.to_string(), "installer.ini is missing");
     }
 }
+
+#[cfg(test)]
+mod props {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn value() -> impl Strategy<Value = String> {
+        prop_oneof![
+            3 => any::<String>(),
+            3 => prop::sample::select(vec![
+                "en_US.UTF-8", "de_DE.UTF-8@euro", "../x", "-x", "a b", "a;b", "\n[Installer]",
+                "us", "dvorak", "true", "1", "yes", "ON", "maybe", "", "\u{feff}", "é",
+            ]).prop_map(String::from),
+        ]
+    }
+
+    fn file_text() -> impl Strategy<Value = String> {
+        let line = prop_oneof![
+            3 => (prop::sample::select(vec![
+                "Version", "Language", "KeyboardLayout", "KeyboardVariant", "Network",
+                "Language[de]", "", "[", "x",
+            ]), value()).prop_map(|(k, v)| format!("{k}={v}")),
+            1 => prop::sample::select(vec!["[Installer]", "[Other]", "[", "]", "#c", ";c", ""])
+                .prop_map(String::from),
+            1 => any::<String>(),
+        ];
+        prop::collection::vec(line, 0..24).prop_map(|v| v.join("\n"))
+    }
+
+    proptest! {
+        /// Never panics on any text; every value it keeps has the shape the
+        /// rest of the program relies on (a short locale name, an XKB name).
+        #[test]
+        fn parsed_values_have_the_safe_shape(t in file_text(), raw in any::<String>()) {
+            for text in [t, raw] {
+                let a = parse(&text).answers;
+                if let Some(l) = &a.language {
+                    prop_assert!(locale_shape(l) && !l.is_empty());
+                }
+                if let Some(l) = &a.keyboard_layout {
+                    prop_assert!(xkb_layout(l));
+                }
+                if let Some(v) = &a.keyboard_variant {
+                    prop_assert!(!v.is_empty() && xkb_variant(v));
+                }
+            }
+        }
+    }
+
+    proptest! {
+        /// Never panics on any bytes in a file, and a file over 64 KiB is
+        /// never read.
+        #[test]
+        fn load_never_panics_on_any_bytes(
+            bytes in prop::collection::vec(any::<u8>(), 0..2048),
+            pad in 0usize..3,
+        ) {
+            static RUNS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            if !crate::budget::within(&RUNS, 150) {
+                return Ok(());
+            }
+            let d = tempfile::tempdir().unwrap();
+            let p = d.path().join("installer.ini");
+            let mut b = bytes;
+            if pad == 2 {
+                b.resize(MAX_BYTES as usize + 1, b'#');
+            }
+            std::fs::write(&p, &b).unwrap();
+            let l = load(&p);
+            if b.len() as u64 > MAX_BYTES {
+                prop_assert_eq!(l.reason, Some(Reason::TooLarge));
+            }
+        }
+    }
+
+    #[test]
+    fn nasty_files() {
+        let huge = format!("[Installer]\nLanguage={}\n", "a".repeat(10 * 1024 * 1024));
+        assert_eq!(parse(&huge).answers.language, None);
+        for t in [
+            "[Installer]\nLanguage=en_US.UTF-8\0\n",
+            "[Installer]\nLanguage=\nKeyboardLayout=-\n",
+            "[Installer]\r\nLanguage=en_US.UTF-8\r\n",
+            "[Installer]\nKeyboardLayout=us\nKeyboardLayout=../../etc\n",
+            "[Installer]\nLanguage[de]=x\n",
+            "\u{feff}[Installer]\nVersion=99999999999999999999\n",
+        ] {
+            let a = parse(t).answers;
+            assert!(a.language.as_deref().is_none_or(locale_shape), "{t:?}");
+            assert!(a.keyboard_layout.as_deref().is_none_or(xkb_layout), "{t:?}");
+        }
+        // the last duplicate wins, so a hostile later line cannot be hidden
+        assert_eq!(
+            parse("[Installer]\nKeyboardLayout=us\nKeyboardLayout=../../etc\n")
+                .answers
+                .keyboard_layout,
+            None
+        );
+    }
+}

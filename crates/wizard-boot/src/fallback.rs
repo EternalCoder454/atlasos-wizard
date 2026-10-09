@@ -256,9 +256,31 @@ fn create(
     state.account = Some(acct.clone());
     save(paths, state);
 
-    if let Err(e) = accounts::verify(paths.root(), user, uid) {
-        log::error!("verify of {user} failed: {}", e.code());
-        return failed(text::REASON_VERIFY, state);
+    // `useradd -m` gives the home HOME_MODE, or 0755 under a login.defs
+    // without one: take group and other access away before any session of
+    // the account can exist.
+    match accounts::secure_home(paths.root(), user, uid) {
+        Ok(true) => log::info!("the new home was open to others; now 0700 or tighter"),
+        Ok(false) => {}
+        // `verify` below has the last word (a home that others can write is
+        // refused there); a chmod that fails must not by itself leave the
+        // machine without an account
+        Err(e) => log::error!(
+            "securing the home of {user} failed: {}; checking it as it is",
+            e.code()
+        ),
+    }
+    match accounts::verify(paths.root(), user, uid) {
+        Ok(()) => {}
+        // the text mode is the last way to an account: a home whose mode this
+        // filesystem will not change (chmod ignored) is logged, not fatal
+        Err(accounts::VerifyError::HomeWritableByOthers) => {
+            log::error!("the home of {user} stays writable by others; going on");
+        }
+        Err(e) => {
+            log::error!("verify of {user} failed: {}", e.code());
+            return failed(text::REASON_VERIFY, state);
+        }
     }
     acct.stage = Stage::Verified;
     state.account = Some(acct);

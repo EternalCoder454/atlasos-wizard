@@ -6,6 +6,13 @@
 # SetupDone it calls EndSetup. After 10 failed GiveUp calls it asks logind to
 # reboot: the boot count then reaches the boot fallback row.
 
+# The wizard holds the password the person types (in its memory, where it
+# cannot be wiped): no core file of KWin or of the wizard, whatever the system's
+# core pattern (systemd-coredump keeps dumps on disk, and a password in one
+# would outlive the setup). The limit is inherited by everything started below.
+# shellcheck disable=SC3045 # ulimit -c is in bash, dash and busybox alike
+ulimit -c 0 2>/dev/null
+
 dir=/run/telamon-setup
 counter=$dir/session-failures
 tries_file=$dir/giveup-tries

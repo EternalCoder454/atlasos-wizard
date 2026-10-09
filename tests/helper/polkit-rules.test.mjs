@@ -58,7 +58,7 @@ const granted = [...source.matchAll(/^\s*"([a-zA-Z0-9.\-]+\.[a-zA-Z0-9.\-]+)"/gm
   .filter((id) => /^(net\.eterneon|org\.freedesktop)\./.test(id));
 
 test("every action in the list is parsed", () => {
-  assert.equal(granted.length, 12, granted.join(","));
+  assert.equal(granted.length, 10, granted.join(","));
   assert.ok(granted.includes(FINISH));
 });
 

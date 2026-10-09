@@ -62,3 +62,32 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod props {
+    use super::*;
+    use proptest::prelude::*;
+    use std::time::Duration;
+
+    proptest! {
+        /// Never panics for any second up to year 9999; always the same
+        /// 20-byte shape with fields in range.
+        #[test]
+        fn rfc3339_has_one_shape(secs in 0u64..253_402_300_799) {
+            let s = rfc3339_utc(UNIX_EPOCH + Duration::from_secs(secs));
+            prop_assert_eq!(s.len(), 20, "{}", s);
+            let b = s.as_bytes();
+            prop_assert!(b[4] == b'-' && b[7] == b'-' && b[10] == b'T' && b[13] == b':'
+                && b[16] == b':' && b[19] == b'Z');
+            let n = |r: std::ops::Range<usize>| s[r].parse::<u32>().unwrap();
+            prop_assert!((1..=12).contains(&n(5..7)) && (1..=31).contains(&n(8..10)));
+            prop_assert!(n(11..13) < 24 && n(14..16) < 60 && n(17..19) < 60);
+        }
+    }
+
+    #[test]
+    fn the_far_future_does_not_panic() {
+        let _ = rfc3339_utc(UNIX_EPOCH + Duration::from_secs(u64::MAX / 2));
+        let _ = rfc3339_utc(SystemTime::now());
+    }
+}

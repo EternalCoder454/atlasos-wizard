@@ -22,5 +22,8 @@ pub mod validate;
 
 mod ini;
 
+#[cfg(test)]
+mod budget;
+
 /// The crate version, written into the done marker as `Wizard=`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

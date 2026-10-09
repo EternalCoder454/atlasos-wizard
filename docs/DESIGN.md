@@ -27,7 +27,9 @@ data/                           everything installed that is not a binary:
   autostart/ libexec/ dnf/
 packaging/telamon-wizard.spec     the RPM; build-rpm.sh builds it in fedora:44
 scripts/dev.sh                  runs a command in the dev container
-tests/                          integration tests (private system bus, mocks)
+tests/                          integration tests (private system bus, mocks), static
+                                checks of data/ (tests/data), and tests/container/real-tools.sh
+                                (the real shadow-utils, in an unprivileged container)
 docs/                           this file, the image hand-over
 ```
 
@@ -37,7 +39,7 @@ docs/                           this file, the image hand-over
 |---|---|---|
 | `/usr/libexec/telamon-wizard-boot prepare` | root, `telamon-wizard-boot.service`, every boot before the display manager | Reads the state and the system, decides (table below), writes or removes the setup autologin, cleans up and locks `telamon-setup` once setup is done. Fast: a few stats when done. |
 | `/usr/libexec/telamon-wizard-boot fallback` | root, `telamon-wizard-fallback.service` on tty1 | Text-mode account creation, when the GUI cannot run. |
-| `/usr/libexec/telamon-wizard-session` | `telamon-setup`, the plasmalogin autologin session `telamon-wizard` | Starts `kwin_wayland` with only the wizard, the screen reader's bus, the on-screen keyboard. Counts the starts this boot that did not end with setup done in `/run/telamon-setup/session-failures` (a wizard that exits 0 without finishing counts too, the count is reset only once a done marker exists, a start that cannot write the count gives up at once, and a failed start waits 2 s before plasmalogin's relogin) and failed `GiveUp` calls in `giveup-tries` (after 10 it logs and asks logind to reboot, the stock `org.freedesktop.login1.reboot` allowed to an active local session, then sleeps so plasmalogin stops respawning it; the boot count then reaches the boot fallback row). At 3 it calls the helper's `GiveUp`. Both counts are files of `telamon-setup`, so that user can reset or raise them: availability only (a crash loop that never gives up, or giving up early); the root-kept `boots` count still sends the next boot to the fallback. If that fails: on `SetupDone` (busctl prints the message, `setup-done: ...`) it calls `EndSetup` (clean-up again, display manager restart); on any other failure it logs with `logger -t telamon-wizard-session`, sleeps 5 s after the first failure, 15 s after the second and 30 s after each later one (about 5 minutes over the 10 tries) and exits non-zero, so a restart loop cannot spin and a slow-starting helper is waited for. |
+| `/usr/libexec/telamon-wizard-session` | `telamon-setup`, the plasmalogin autologin session `telamon-wizard` | Starts `kwin_wayland` with only the wizard, the screen reader's bus, the on-screen keyboard, with `ulimit -c 0` (the wizard holds the typed password in memory, where it cannot be wiped, and systemd-coredump would keep a dump on disk). Counts the starts this boot that did not end with setup done in `/run/telamon-setup/session-failures` (a wizard that exits 0 without finishing counts too, the count is reset only once a done marker exists, a start that cannot write the count gives up at once, and a failed start waits 2 s before plasmalogin's relogin) and failed `GiveUp` calls in `giveup-tries` (after 10 it logs and asks logind to reboot, the stock `org.freedesktop.login1.reboot` allowed to an active local session, then sleeps so plasmalogin stops respawning it; the boot count then reaches the boot fallback row). At 3 it calls the helper's `GiveUp`. Both counts are files of `telamon-setup`, so that user can reset or raise them: availability only (a crash loop that never gives up, or giving up early); the root-kept `boots` count still sends the next boot to the fallback. If that fails: on `SetupDone` (busctl prints the message, `setup-done: ...`) it calls `EndSetup` (clean-up again, display manager restart); on any other failure it logs with `logger -t telamon-wizard-session`, sleeps 5 s after the first failure, 15 s after the second and 30 s after each later one (about 5 minutes over the 10 tries) and exits non-zero, so a restart loop cannot spin and a slow-starting helper is waited for. |
 | `/usr/bin/telamon-wizard` | `telamon-setup` | The setup pages. |
 | `/usr/bin/telamon-wizard --welcome` | the signed-in user, XDG autostart | First-login extras: fingerprint, PIN. |
 | `/usr/libexec/telamon-wizard-helper` | root, D-Bus activated (`telamon-wizard-helper.service`, `Type=dbus`), exits after 30 s idle | The only privileged code the GUI reaches. |
@@ -123,7 +125,7 @@ and shows its own translated text for the code. `gave-up` (`Invalid`) is the ref
 
 | Method | Polkit action | Does |
 |---|---|---|
-| `CreateAccount(s name, s full_name, ay password, b autologin) -> u uid` | `net.eterneon.telamon.wizard.create-account` | AccountsService `CreateUser(name, full_name, 1)` (administrator: wheel), then `SetPassword(yescrypt hash, "")` with the hash made in the helper. State stages `creating`, `created`, `password-set`, `verified` are written before and after each step. Verifies the passwd entry, the shadow hash, wheel, and the home owned by the uid. One account per first run: a second call fails unless the state names a half-made account, which is deleted first (only that uid, only when its home holds nothing but skel; a `creating` stage, which has no uid yet, is deleted by name only when its uid is 1000..=60000, its shadow hash is absent, locked or empty and its home is skel-only, else `half-made-account-unclear`). Refused with `Invalid` `gave-up` ("Setup moved to text mode.") once `GiveUp` has run. A uid outside 1000..=60000 from `CreateUser` is refused (`accounts-bad-uid`) and the state stays `creating`. The helper zeroes its own copies of the password; it cannot zero zbus's message buffers, which is why core dumps are disabled (`PR_SET_DUMPABLE`, `LimitCORE=0`). |
+| `CreateAccount(s name, s full_name, ay password, b autologin) -> u uid` | `net.eterneon.telamon.wizard.create-account` | AccountsService `CreateUser(name, full_name, 1)` (administrator: wheel), then `SetPassword(yescrypt hash, "")` with the hash made in the helper. State stages `creating`, `created`, `password-set`, `verified` are written before and after each step. Then makes the home private (`accounts::secure_home`: `chmod go-rwx` through a descriptor checked to be that directory, never a symlink, owned by the uid; Fedora's `HOME_MODE` is 0700, a system without it leaves 0755; a chmod that fails is logged and `verify` then decides, so it cannot by itself leave the machine without an account) and verifies the passwd entry, the shadow hash, wheel, and the home owned by the uid and not writable by its group or others (`verify-home-writable`). One account per first run: a second call fails unless the state names a half-made account, which is deleted first (only that uid, only when its home holds nothing but skel; a `creating` stage, which has no uid yet, is deleted by name only when its uid is 1000..=60000, its shadow hash is absent, locked or empty and its home is skel-only, else `half-made-account-unclear`). Refused with `Invalid` `gave-up` ("Setup moved to text mode.") once `GiveUp` has run. A uid outside 1000..=60000 from `CreateUser` is refused (`accounts-bad-uid`) and the state stays `creating`. The helper zeroes its own copies of the password; it cannot zero zbus's message buffers, which is why core dumps are disabled (`PR_SET_DUMPABLE`, `LimitCORE=0`). |
 | `Finish(a{sv} choices)` | `net.eterneon.telamon.wizard.finish` | Writes the new account's settings as that user (below), the autologin drop-in if asked, then the done markers, removes the setup autologin, locks `telamon-setup`. Refused with `Invalid` `gave-up` once `GiveUp` has run, unless it resumes `finish` = `markers`. Idempotent: a repeat after a crash finishes the remaining steps (state `finish`: `settings`, `autologin`, `markers`, `done`; once the markers exist only the clean-up is redone, and its failures are logged, not returned, since `prepare` redoes it at the next boot). |
 | `EndSetup()` | `net.eterneon.telamon.wizard.finish` | Verifies the clean-up (the setup autologin drop-in is absent, `telamon-setup`'s shadow expire field is 0 or a past day, its shell is `/usr/sbin/nologin`), redoing it once if not and failing with `cleanup-incomplete` without restarting if it still is not; then restarts `display-manager.service` (systemd D-Bus, fixed unit). When the markers exist but `finish` is still `markers` (a cut, or GiveUp's retry) and the state's account is `verified` and passes `accounts::verify` (else `not-finished`, clean-up left to `prepare`), it first runs Finish's tail (remove the setup autologin, lock `telamon-setup`, `finish` = `done`). Repeatable. |
 | `GiveUp()` | `net.eterneon.telamon.wizard.fallback` | Records it in the state, removes the setup autologin, starts `telamon-wizard-fallback.service`. Not refused when the state's account is `verified` or `finish` is set: the fallback then finishes without asking when passwd lists the account (refusing would strand the machine when the wizard crashes after the account is made). Done markers, or markers that cannot be checked, give `SetupDone`. |
@@ -164,14 +166,14 @@ check; the helper's own state checks bound it (`SetupDone` unless `finish` is
 a stub `polkit`.
 
 - `org.freedesktop.locale1.set-locale`, `org.freedesktop.locale1.set-keyboard`
-- `org.freedesktop.timedate1.set-timezone`, `org.freedesktop.timedate1.set-ntp`
+- `org.freedesktop.timedate1.set-timezone`
 - `org.freedesktop.hostname1.set-static-hostname`, `org.freedesktop.hostname1.set-hostname`
 - `org.freedesktop.NetworkManager.settings.modify.system`,
-  `org.freedesktop.NetworkManager.network-control`,
-  `org.freedesktop.NetworkManager.enable-disable-wifi`
+  `org.freedesktop.NetworkManager.network-control`
 
 plasma-setup's other grants (its KAuth actions, display scaling, temporary
-autologin) are not carried over. After setup `telamon-setup` can have no
+autologin) are not carried over, and neither are `timedate1.set-ntp` and
+`NetworkManager.enable-disable-wifi`, which nothing here calls. After setup `telamon-setup` can have no
 session (below), so the rule can never match again, and the markers close it
 even if the clean-up failed.
 
@@ -262,7 +264,8 @@ can log in.
 `TTYPath=/dev/tty1`, `StandardInput=tty`): asks for the full name, user name
 and password twice on the console, with the same wizard-core validation, and
 creates the account with `useradd -m -U -G wheel -c <name> <user>` and
-`chpasswd -e` (the hash on stdin), fixed argv (`--` before the user name). It is the one path that does
+`chpasswd -e` (the hash on stdin), fixed argv (`--` before the user name), then
+makes the home private as the helper does (the text mode is the last way to an account, so a home whose mode the filesystem will not change is logged, not fatal). It is the one path that does
 not use AccountsService, so a broken AccountsService still ends in an
 account. Then it writes the markers, cleans up and starts the display manager.
 No Qt, GPU or network needed. The password is typed into it, so it turns
@@ -322,14 +325,18 @@ Appearance, Privacy, Finish. First login: Fingerprint, PIN.
 - **Account**: full name, user name (derived from the full name until edited),
   password and confirmation with a strength meter, "Sign in automatically"
   (off). Rules (decided 2026-10-05): user name `^[a-z_][a-z0-9_-]{0,31}$`, not
-  a name in passwd or group, not reserved; full name at most 255 bytes, no
+  a name in passwd or group, not reserved (`root`, `nobody`, the setup users,
+  `systemd-*`, and the accounts and groups that packages create now or in a
+  later image: `sshd`, `dbus`, `polkitd`, `sys`, `sudo`, and so on;
+  `validate::RESERVED_NAMES`); full name at most 255 bytes, no
   `:`, `,`, `=`, newline, control characters or invisible format characters
   that disguise it (bidi controls, zero-width space, BOM, tags; the joiners
   ZWJ and ZWNJ are allowed); password at least 8
   characters, not the user name or full name, and libpwquality's check
   (dictionary included) passes.
 - **Hostname**: only when the static hostname is unset, `localhost*` or
-  `fedora`, prefilled `telamon` (the image's `DEFAULT_HOSTNAME`, which still says `atlasos`
+  `fedora`, one RFC 1123 label (lower-case ASCII letters, digits and `-`, at
+  most 63, not starting or ending with `-`, not `localhost`), prefilled `telamon` (the image's `DEFAULT_HOSTNAME`, which still says `atlasos`
 until the image moves; nothing
   personal goes on the network unless the user types it).
 - **Appearance**: Telamon OS Light / Dark pictured as desktops (drawn, in the

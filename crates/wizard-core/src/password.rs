@@ -617,3 +617,101 @@ mod tests {
         assert_eq!(c.len(), all.len());
     }
 }
+
+#[cfg(test)]
+mod props {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        /// A password the name rules accept holds neither the user name (3
+        /// characters or more) nor a word of the full name, in any letter
+        /// case, and is not equal to either.
+        #[test]
+        fn accepted_passwords_do_not_hold_the_names(
+            pw in "[A-Za-z0-9 _-]{0,24}",
+            user in "[A-Za-z0-9_-]{0,8}",
+            full in "[A-Za-z0-9 ]{0,16}",
+        ) {
+            if related_to_names(&pw, &user, &full).is_ok() {
+                let (l, u, f) = (
+                    pw.to_lowercase(),
+                    user.trim().to_lowercase(),
+                    full.trim().to_lowercase(),
+                );
+                prop_assert!(u.is_empty() || l != u);
+                prop_assert!(u.chars().count() < 3 || !l.contains(&u));
+                prop_assert!(f.is_empty() || l != f);
+                for w in f.split(|c: char| !c.is_alphanumeric()) {
+                    prop_assert!(w.chars().count() < 3 || !l.contains(w));
+                }
+            }
+        }
+    }
+
+    proptest! {
+        /// Never panics, on any bytes (non-UTF-8, NUL, 700 bytes), user or
+        /// full name; an accepted password is text of 8 to 511 bytes and at
+        /// least 8 characters without a NUL, and its score is 0 to 100.
+        #[test]
+        fn check_never_panics_and_accepts_only_usable_passwords(
+            pw in prop::collection::vec(any::<u8>(), 0..700),
+            text in "\\PC{0,40}",
+            user in "[a-z_][a-z0-9_-]{0,12}",
+            full in "\\PC{0,24}",
+        ) {
+            static RUNS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            if !crate::budget::within(&RUNS, 300) {
+                return Ok(());
+            }
+            for bytes in [pw.as_slice(), text.as_bytes()] {
+                if let Ok(score) = check(bytes, &user, &full) {
+                    let s = std::str::from_utf8(bytes).unwrap();
+                    prop_assert!(bytes.len() <= MAX_BYTES && s.chars().count() >= MIN_CHARS);
+                    prop_assert!(!bytes.contains(&0));
+                    prop_assert!(score.value() <= 100 && score.meter() <= 4);
+                }
+            }
+        }
+    }
+
+    proptest! {
+        /// A hash of any NUL-free password is a bounded yescrypt string that
+        /// checks only that password.
+        #[test]
+        fn hash_is_bounded_yescrypt_and_checks_only_its_password(
+            pw in prop::collection::vec(1u8..=255, 1..64),
+        ) {
+            static RUNS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            if !crate::budget::within(&RUNS, 4) {
+                return Ok(());
+            }
+            let h = hash(&pw).unwrap();
+            prop_assert!(h.starts_with("$y$") && h.len() < 128);
+            prop_assert!(h.bytes().all(|b| b.is_ascii_graphic() && b != b':'));
+            prop_assert!(verify(&pw, &h));
+            let mut other = pw.clone();
+            other.push(b'x');
+            prop_assert!(!verify(&other, &h));
+        }
+    }
+
+    #[test]
+    fn nasty_passwords() {
+        let big = vec![b'a'; 10 * 1024 * 1024];
+        assert_eq!(check(&big, "u", ""), Err(PasswordError::TooLong));
+        assert_eq!(hash(&big), Err(HashError::TooLong));
+        assert!(!verify(&big, "$y$j9T$x$y"));
+        assert_eq!(hash(&[0]), Err(HashError::HasNul));
+        // a hash with a NUL or a colon-bearing setting is just "no"
+        assert!(!verify(b"password", "$y$j9T$a\0b"));
+        assert!(!verify(b"password", &"$".repeat(100_000)));
+        for pw in [
+            "\u{202e}violet-Harbor-93",
+            "violet-Harbor-93\n",
+            "violet\tHarbor 93 lantern",
+        ] {
+            let _ = check(pw.as_bytes(), "bob", "Bob");
+        }
+    }
+}

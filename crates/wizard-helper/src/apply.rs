@@ -86,6 +86,10 @@ pub fn scale_font(font: &str, factor: f64) -> Option<String> {
         return None;
     }
     let scaled = ((size * factor) * 100.0).round() / 100.0;
+    if scaled <= 0.0 {
+        // a size so small it rounds to nothing is not a font
+        return None;
+    }
     let text = format!("{scaled}");
     fields[1] = &text;
     Some(fields.join(","))
@@ -597,5 +601,89 @@ toolBarFont=Noto Sans,9,-1,5,400,0,0,0,0,0,0,0,0,0,0,1\nsmallestReadableFont=Not
         );
         assert!(r.is_err());
         assert_eq!(fs::read_to_string(&victim).unwrap(), "keep");
+    }
+}
+
+#[cfg(test)]
+mod props {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        /// Never panics on any text; a font that is scaled keeps all its
+        /// other fields and has a size inside a sane range.
+        #[test]
+        fn scale_font_changes_only_the_size(
+            f in "[A-Za-z ]{0,8}(,[-0-9.eE+ a-z]{0,8}){0,6}",
+            raw in any::<String>(),
+            factor in prop::sample::select(vec![1.0f64, 1.25, 1.5]),
+        ) {
+            let _ = scale_font(&raw, factor);
+            if let Some(out) = scale_font(&f, factor) {
+                let (a, b): (Vec<&str>, Vec<&str>) = (f.split(',').collect(), out.split(',').collect());
+                prop_assert_eq!(a.len(), b.len());
+                for i in (0..a.len()).filter(|i| *i != 1) {
+                    prop_assert_eq!(a[i], b[i]);
+                }
+                let size: f64 = b[1].parse().unwrap();
+                prop_assert!(size.is_finite() && size > 0.0 && size <= 300.0);
+            }
+        }
+
+        /// The child's input parser never panics on any bytes, and accepts
+        /// only what `choices::validate` accepts.
+        #[test]
+        fn parse_choices_never_panics(bytes in prop::collection::vec(any::<u8>(), 0..600)) {
+            let _ = parse_choices(&bytes);
+        }
+
+        /// What the helper sends the child, the child accepts unchanged.
+        #[test]
+        fn choices_survive_the_trip_to_the_child(
+            look in prop::sample::select(vec!["light", "dark"]),
+            accent in prop::sample::select(choices::ACCENTS.to_vec()),
+            scale in prop::sample::select(vec![1.0f64, 1.25, 1.5]),
+            flags in prop::array::uniform3(any::<bool>()),
+            kb in prop::option::of(("[a-z]{1,8}", "[a-z]{0,8}")),
+        ) {
+            let mut m = BTreeMap::from([
+                ("look".to_string(), Value::Str(look.into())),
+                ("accent".to_string(), Value::Str(accent.into())),
+                ("text_scale".to_string(), Value::F64(scale)),
+                ("high_contrast".to_string(), Value::Bool(flags[0])),
+                ("screen_reader".to_string(), Value::Bool(flags[1])),
+                ("crash_reports".to_string(), Value::Bool(flags[2])),
+            ]);
+            if let Some((l, v)) = kb {
+                m.insert("keyboard".into(), Value::Map(BTreeMap::from([
+                    ("layout".to_string(), Value::Str(l)),
+                    ("variant".to_string(), Value::Str(v)),
+                ])));
+            }
+            let c = choices::validate(&m).unwrap();
+            prop_assert_eq!(parse_choices(&choices_json(&c)).unwrap(), c);
+        }
+    }
+
+    #[test]
+    fn nasty_child_input() {
+        let deep = format!("{}1{}", "[".repeat(200_000), "]".repeat(200_000));
+        assert!(parse_choices(deep.as_bytes()).is_err());
+        let deep = format!(
+            "{}1{}",
+            "{\"keyboard\":".repeat(100_000),
+            "}".repeat(100_000)
+        );
+        assert!(parse_choices(deep.as_bytes()).is_err());
+        assert!(parse_choices(b"").is_err());
+        assert!(parse_choices(b"[]").is_err());
+        assert!(parse_choices(b"{\"look\":\"dark\",\"look\":\"neon\"}").is_err());
+        assert!(parse_choices(&vec![b' '; 1 << 20]).is_err());
+        assert!(parse_choices(b"{\"text_scale\":1e999}").is_err());
+        assert!(scale_font(&",".repeat(1 << 20), 1.5).is_none());
+        assert!(scale_font("f,NaN", 1.5).is_none());
+        assert!(scale_font("f,1e308", 1.5).is_none());
+        assert!(scale_font("f,-3", 1.5).is_none());
+        assert!(scale_font(",1E-3", 1.0).is_none(), "rounds to a size of 0");
     }
 }

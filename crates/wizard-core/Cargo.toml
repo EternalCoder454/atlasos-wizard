@@ -5,6 +5,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+publish = false
 rust-version.workspace = true
 
 [dependencies]
@@ -15,3 +16,9 @@ zeroize.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+proptest = { version = "1", default-features = false, features = ["std"] }
+
+# Static checks of data/ and of the places the programs read their environment.
+[[test]]
+name = "data"
+path = "../../tests/data/main.rs"

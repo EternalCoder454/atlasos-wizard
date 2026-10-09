@@ -132,10 +132,20 @@ fn section_name(t: &str) -> Option<&str> {
 ///
 /// # Errors
 /// `InvalidInput` when `section`, `key` or `value` holds a line break or other
-/// control character, or `key` holds `=`.
+/// control character, or `key` holds `=`, is empty, starts with `[` or has a
+/// blank at either end (any of which would not read back as that one key).
 pub fn ini_set(text: &str, section: &str, key: &str, value: &str) -> io::Result<String> {
     let bad = |s: &str| s.chars().any(char::is_control);
-    if bad(section) || bad(key) || bad(value) || key.contains('=') || key.is_empty() {
+    // A key that starts with `[` (after blanks) could, with a value that ends
+    // in `]`, read back as a section header: `[evil=x]`.
+    if bad(section)
+        || bad(key)
+        || bad(value)
+        || key.contains('=')
+        || key.is_empty()
+        || key.trim_start().starts_with('[')
+        || key != key.trim()
+    {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "bad ini section, key or value",
@@ -266,5 +276,149 @@ mod tests {
         symlink(other.path(), d.path().join("evil")).unwrap();
         assert!(ensure_dir_under(d.path(), &d.path().join("evil/x"), 0o700).is_err());
         assert!(ensure_dir_under(d.path(), Path::new("/elsewhere"), 0o700).is_err());
+    }
+}
+
+#[cfg(test)]
+mod props {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn word() -> impl Strategy<Value = String> {
+        prop_oneof![
+            3 => "[A-Za-z0-9 _.\\[\\]=#;-]{0,10}",
+            1 => any::<String>(),
+            1 => prop::sample::select(vec!["\n", "\r", "\0", "[", "]", "=", " ", "[x]", "]x[", "x]"])
+                .prop_map(String::from),
+        ]
+    }
+
+    fn ini_text() -> impl Strategy<Value = String> {
+        let line = prop_oneof![
+            2 => "[A-Za-z]{1,6}=[A-Za-z0-9 ]{0,6}",
+            1 => "\\[[A-Za-z]{1,6}\\]",
+            1 => word(),
+        ];
+        prop::collection::vec(line, 0..10).prop_map(|v| v.join("\n"))
+    }
+
+    proptest! {
+        /// Whatever the section, key and value: `ini_set` either refuses or
+        /// writes that one assignment, which reads back as exactly what was
+        /// given; no other key changes and no header is made by accident.
+        #[test]
+        fn ini_set_writes_one_assignment_that_reads_back(
+            text in ini_text(), section in word(), key in word(), value in word(),
+        ) {
+            match ini_set(&text, &section, &key, &value) {
+                Err(_) => {}
+                Ok(out) => {
+                    prop_assert_eq!(ini_get(&out, &section, &key), Some(value.trim()));
+                    // every key that read back before still does, unchanged,
+                    // except the one set
+                    for line in text.lines() {
+                        let t = line.trim();
+                        if let Some((k, _)) = t.split_once('=')
+                            && section_name(t).is_none()
+                            && k.trim_end() != key
+                        {
+                            prop_assert!(out.lines().any(|l| l == line), "{line:?} lost");
+                        }
+                    }
+                    prop_assert!(out.ends_with('\n'));
+                    prop_assert!(text.contains('\r') || !out.contains('\r'), "only the old lines carry a CR");
+                }
+            }
+        }
+
+        /// `ini_get` never panics on any text.
+        #[test]
+        fn ini_get_never_panics(t in any::<String>(), s in word(), k in word()) {
+            let _ = ini_get(&t, &s, &k);
+        }
+    }
+
+    proptest! {
+        /// `ensure_dir_under` never creates anything outside its base, and
+        /// refuses a path that climbs.
+        #[test]
+        fn ensure_dir_stays_under_its_base(
+            parts in prop::collection::vec(
+                prop::sample::select(vec!["a", "b", "..", ".", "", "a b", "-x", "c"]), 0..6),
+        ) {
+            static RUNS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            if !crate::budget::within(&RUNS, 100) {
+                return Ok(());
+            }
+            let outer = tempfile::tempdir().unwrap();
+            let base = outer.path().join("base");
+            fs::create_dir(&base).unwrap();
+            let dir = parts.iter().fold(base.clone(), |p, c| p.join(c));
+            let r = ensure_dir_under(&base, &dir, 0o700);
+            let names: Vec<_> = fs::read_dir(outer.path()).unwrap()
+                .map(|e| e.unwrap().file_name()).collect();
+            prop_assert_eq!(names.len(), 1, "something was made beside the base");
+            if parts.contains(&"..") {
+                prop_assert!(r.is_err());
+            }
+            if r.is_ok() {
+                let real = fs::canonicalize(&dir).unwrap();
+                prop_assert!(real.starts_with(fs::canonicalize(&base).unwrap()));
+            }
+        }
+
+        /// A symlink is never read through, whatever it points at, and the
+        /// text of a regular file comes back only when it is UTF-8.
+        #[test]
+        fn read_nofollow_reads_plain_utf8_files_only(
+            bytes in prop::collection::vec(any::<u8>(), 0..300),
+        ) {
+            static RUNS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            if !crate::budget::within(&RUNS, 100) {
+                return Ok(());
+            }
+            let d = tempfile::tempdir().unwrap();
+            let f = d.path().join("f");
+            fs::write(&f, &bytes).unwrap();
+            let got = read_nofollow(&f);
+            prop_assert_eq!(got.is_ok(), std::str::from_utf8(&bytes).is_ok());
+            std::os::unix::fs::symlink(&f, d.path().join("l")).unwrap();
+            prop_assert!(read_nofollow(&d.path().join("l")).is_err());
+            prop_assert!(write_nofollow(&d.path().join("l"), b"x", 0o600).is_err());
+            prop_assert_eq!(fs::read(&f).unwrap(), bytes);
+        }
+    }
+
+    #[test]
+    fn a_key_cannot_make_a_header() {
+        // the case the property found: `[evil` + `x]` reads as the header `[evil=x]`
+        assert!(ini_set("", "General", "[evil", "x]").is_err());
+        assert!(ini_set("", "General", " [evil", "x]").is_err());
+        assert!(ini_set("", "General", " padded", "x").is_err());
+        assert!(ini_set("", "General", "ok", "x]").is_ok());
+        assert!(ini_set("", "General", "ok[de]", "x").is_ok());
+    }
+
+    #[test]
+    fn nasty_files_and_names() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join("big");
+        fs::write(&f, vec![b'a'; 2 * 1024 * 1024]).unwrap();
+        assert!(read_nofollow(&f).is_err(), "over 1 MiB is refused");
+        // a FIFO is not a regular file and must not hang the reader
+        let fifo = d.path().join("fifo");
+        assert!(
+            std::process::Command::new("mkfifo")
+                .arg(&fifo)
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert!(read_nofollow(&fifo).is_err());
+        assert!(write_nofollow(&fifo, b"x", 0o600).is_err());
+        assert!(ensure_dir_under(d.path(), &d.path().join("a/../../x"), 0o700).is_err());
+        assert!(ensure_dir_under(d.path(), Path::new("/etc"), 0o700).is_err());
+        let huge = ini_set(&"[a]\nk=v\n".repeat(100_000), "a", "k", "w").unwrap();
+        assert!(huge.contains("k=w"));
     }
 }

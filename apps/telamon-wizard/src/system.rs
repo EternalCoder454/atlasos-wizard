@@ -533,7 +533,9 @@ impl System for Real {
                     "802-11-wireless-security",
                     HashMap::from([
                         ("key-mgmt", Value::from("wpa-psk")),
-                        ("psk", Value::from(password.as_str().to_string())),
+                        // borrowed, so no second heap copy of the passphrase
+                        // is left unwiped when the message is sent
+                        ("psk", Value::from(password.as_str())),
                     ]),
                 );
             }
@@ -803,3 +805,90 @@ const DEMO_ZONES: &str = "DE,AT\t+5230+01322\tEurope/Berlin\tGermany\nGB\t+51303
 FR\t+4852+00220\tEurope/Paris\t\nUS\t+404251-0740023\tAmerica/New_York\tEastern\nUS\t+415100-0873900\tAmerica/Chicago\tCentral\n\
 US\t+340308-1181434\tAmerica/Los_Angeles\tPacific\nJP\t+353916+1394441\tAsia/Tokyo\t\nIN\t+2232+08822\tAsia/Kolkata\t\n\
 AU\t-3352+15113\tAustralia/Sydney\tNew South Wales\n";
+
+#[cfg(test)]
+mod tests {
+    //! The checks the setters make before anything reaches the bus: a hostile
+    //! string must be refused as `bad-argument`, never sent to localed,
+    //! timedated, hostnamed or NetworkManager. (A valid value would try the
+    //! system bus, so only refused ones are called.)
+    use super::*;
+
+    fn nasty() -> Vec<String> {
+        let mut v: Vec<String> = [
+            "",
+            "\n",
+            "a\nb",
+            "a\0b",
+            "..",
+            "../etc",
+            "/etc/passwd",
+            "-x",
+            "--root=/",
+            "a b",
+            "a;b",
+            "a$(b)",
+            "a`b`",
+            "\u{202e}x",
+            "é",
+            "x=y",
+            "a,b",
+        ]
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+        v.push("a".repeat(10 * 1024 * 1024));
+        v
+    }
+
+    #[test]
+    fn hostile_strings_never_reach_the_bus() {
+        let real = Real::default();
+        let bad = |r: Res<()>| assert_eq!(r.unwrap_err().code, "bad-argument");
+        for s in nasty() {
+            if !s.ends_with(".UTF-8") {
+                bad(real.set_language(&s));
+            }
+            bad(real.set_hostname(&s));
+            bad(real.set_timezone(&s));
+            bad(real.set_keyboard(&s, ""));
+            if !s.is_empty() {
+                bad(real.set_keyboard("us", &s));
+            }
+        }
+        // a language needs the UTF-8 suffix and plain characters
+        for s in [
+            "de_DE",
+            "de_DE.UTF-8\n",
+            "de DE.UTF-8",
+            "-x.UTF-8;",
+            "../.UTF-8 x",
+        ] {
+            bad(real.set_language(s));
+        }
+        bad(real.set_hostname("localhost"));
+        bad(real.set_timezone("Europe//Berlin"));
+        bad(real.set_timezone("../../etc/passwd"));
+    }
+
+    #[test]
+    fn a_network_that_is_not_a_networkmanager_path_is_refused() {
+        let real = Real::default();
+        let pw = || Zeroizing::new("CANARY-wifi-pw".to_string());
+        let nm = "/org/freedesktop/NetworkManager";
+        for (dev, ap, ssid) in [
+            ("/etc/passwd", "/", "net"),
+            ("", "/", "net"),
+            ("/org/freedesktop/NetworkManager/Devices/2\n", "/", "net"),
+            ("/org/freedesktop/NetworkManager/../../x", "/", "net"),
+            (&format!("{nm}/Devices/2"), "/etc/shadow", "net"),
+            (&format!("{nm}/Devices/2"), "/", ""),
+            (&format!("{nm}/Devices/2"), "/", &"s".repeat(33)),
+        ] {
+            let r = real.wifi_connect(dev, ap, ssid, pw(), false);
+            let f = r.unwrap_err();
+            assert_eq!(f.code, "bad-argument", "{dev} {ap} {ssid}");
+            assert!(!f.text.contains("CANARY"));
+        }
+    }
+}

@@ -5,6 +5,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+publish = false
 rust-version.workspace = true
 
 [lib]
@@ -41,5 +42,6 @@ zeroize.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+proptest = { version = "1", default-features = false, features = ["std"] }
 tokio = { workspace = true, features = ["test-util"] }
 wizard-helper = { path = ".", features = ["test-root"] }

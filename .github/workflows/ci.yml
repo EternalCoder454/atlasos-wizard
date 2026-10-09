@@ -114,6 +114,12 @@ jobs:
       - name: Shell scripts
         run: shellcheck scripts/*.sh ci/*.sh packaging/*.sh data/libexec/*
 
+      # The script the package build runs on the finished programs
+      # (docs/SECURITY.md, "Build hardening") against programs built with and
+      # without the hardening it looks for.
+      - name: Hardening check
+        run: scripts/test-check-hardening.sh
+
       # Session files carry DesktopNames, which display managers read but
       # desktop-file-validate rejects as a non-X- key: they get a key check.
       - name: Desktop files
@@ -197,6 +203,30 @@ jobs:
       # dbus-daemon, python-dbusmock) and the boot tests (real binary, temp roots).
       - name: Tests
         run: cargo test --workspace --locked
+      # The validators and parsers (user names, hostnames, locales, the state
+      # and installer.ini files, ...) with up to 20000 random cases each, not
+      # the 256 of a local run (a property that writes files or hashes with
+      # yescrypt stops at 4 to 300 of them). The property tests are the ones
+      # named props.
+      - name: Property tests
+        env:
+          PROPTEST_CASES: "20000"
+        run: cargo test --workspace --locked -- props
+      # The polkit rule that lets the setup user change the system's settings
+      # only while setup is not done, against a stub polkit.
+      # (nodejs is in the CI image from the next image build on; until the
+      # published image has it, it is installed here)
+      - name: Polkit rule
+        run: |
+          command -v node >/dev/null || dnf -y install nodejs
+          node --test tests/helper/polkit-rules.test.mjs
+      # The real useradd, chpasswd, userdel and chage against wizard-core, in a
+      # throw-away root below /tmp (shadow-utils' -P); it refuses to run outside
+      # a container, and this job is in one.
+      - name: Real shadow-utils
+        env:
+          TELAMON_REAL_TOOLS_REQUIRE: "1"
+        run: tests/container/real-tools.sh
       - run: ccache --show-stats
       - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: github.ref == 'refs/heads/main' && steps.ccache.outputs.cache-hit != 'true'

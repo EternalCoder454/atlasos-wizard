@@ -5,7 +5,7 @@
 %global debug_package %{nil}
 
 Name:           telamon-wizard
-Version:        0.2.3
+Version:        0.3.0
 Release:        1%{?dist}
 Summary:        Telamon Setup, the first-run wizard of Telamon OS
 License:        MIT
@@ -22,6 +22,8 @@ BuildRequires:  rust
 BuildRequires:  rust-srpm-macros
 BuildRequires:  gcc
 BuildRequires:  gcc-c++
+# readelf, for scripts/check-hardening.sh in %%check
+BuildRequires:  binutils
 BuildRequires:  cmake
 BuildRequires:  ninja-build
 BuildRequires:  corrosion
@@ -182,15 +184,14 @@ if [ "$rc" != 1 ]; then
     echo "telamon-wizard holds the build path %{_builddir} (grep status $rc)" >&2
     exit 1
 fi
-# The test-root feature must not be in the shipped programs.
-for b in telamon-wizard-helper telamon-wizard-boot; do
-    rc=0
-    grep -qF TELAMON_WIZARD_TEST %{buildroot}%{_libexecdir}/$b || rc=$?
-    if [ "$rc" != 1 ]; then
-        echo "$b holds TELAMON_WIZARD_TEST (grep status $rc)" >&2
-        exit 1
-    fi
-done
+# The programs carry the hardening the build flags give them (position
+# independent, full RELRO and BIND_NOW, no executable stack, no RPATH, no text
+# relocations, stack protectors in the C++), and none of them has the tests'
+# hooks (the test-root feature: every TELAMON_WIZARD_TEST_* variable): readelf
+# and grep say, not the flags we meant. A failure fails the package build.
+scripts/check-hardening.sh --cxx --forbid-string TELAMON_WIZARD_TEST %{buildroot}%{_bindir}/telamon-wizard
+scripts/check-hardening.sh --forbid-string TELAMON_WIZARD_TEST \
+    %{buildroot}%{_libexecdir}/telamon-wizard-helper %{buildroot}%{_libexecdir}/telamon-wizard-boot
 desktop-file-validate %{buildroot}%{_datadir}/applications/net.eterneon.telamon.wizard.desktop
 desktop-file-validate %{buildroot}%{_datadir}/applications/net.eterneon.atlas.wizard.desktop
 # The old names reach the same programs and units.
@@ -257,6 +258,27 @@ done
 # files when it is removed. /etc/telamon and /etc/atlasos are made by tmpfiles.d.
 
 %changelog
+* Thu Oct 08 2026 EternalHell <77252745+EternalCoder454@users.noreply.github.com> - 0.3.0-1
+- Secure phase. The threat model, the rules and the tests that hold them are in
+  docs/SECURITY.md.
+- The new account's home is made private (0700) by the helper and by the text-mode
+  setup, and setup refuses a home that others can write. Before, it kept the mode
+  useradd gave it (0755, or 0777 under a loose umask).
+- More system accounts are reserved as user names (sshd, dbus, polkitd, sudo, ...);
+  keyboard layout names can no longer start with - or _; the computer name
+  "localhost" and malformed time zone names are refused.
+- The helper refuses D-Bus values nested five levels or deeper (an unbounded
+  nesting overflowed the stack in a unit test) and the polkit rule no longer
+  grants two actions nothing used (NTP, Wi-Fi radio).
+- The GUI no longer writes the Wi-Fi name to the journal, copies the Wi-Fi password,
+  or leaves a core dump of the typed password (the setup session turns them off).
+- Build: the package build checks the programs' hardening (PIE, full RELRO, no
+  executable stack, stack protectors) and that none holds a test hook, and
+  fails without it; release builds panic on integer overflow; CI runs cargo-deny
+  and cargo-audit, property tests of the validators and parsers, the real
+  useradd, chpasswd and userdel in a container, and the polkit rule's test; the
+  dev image checks that the framework tag is still the locked commit.
+
 * Thu Oct 08 2026 EternalHell <77252745+EternalCoder454@users.noreply.github.com> - 0.2.3-1
 - Fix: the app used about 8% of a core with its window idle. The icon layers added in the last release
   were redrawn on every frame with Qt Quick's software renderer; a layer is live now only for a moment

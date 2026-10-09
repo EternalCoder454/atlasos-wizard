@@ -133,10 +133,13 @@ impl ChoicesError {
     }
 }
 
-/// True for an XKB layout name: `^[a-z0-9_-]{1,32}$`. Checks the shape only,
-/// not whether the layout is installed.
+/// True for an XKB layout name: `^[a-z0-9][a-z0-9_-]{0,31}$` (never starting
+/// with `-` or `_`, so it cannot read as an option wherever it ends up).
+/// Checks the shape only, not whether the layout is installed.
 pub fn xkb_layout(s: &str) -> bool {
-    (1..=32).contains(&s.len()) && s.bytes().all(xkb_byte)
+    (1..=32).contains(&s.len())
+        && s.bytes().all(xkb_byte)
+        && s.as_bytes()[0].is_ascii_alphanumeric()
 }
 
 /// True for an XKB variant name: empty, or the same shape as a layout.
@@ -397,5 +400,134 @@ mod tests {
         assert!(kb(&[("layout", s("U S"))]).is_err());
         assert!(kb(&[("layout", s("us")), ("variant", s("a/b"))]).is_err());
         assert!(kb(&[("layout", s("us")), ("model", s("pc105"))]).is_err());
+    }
+}
+
+#[cfg(test)]
+mod props {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn key() -> impl Strategy<Value = String> {
+        prop_oneof![
+            4 => prop::sample::select(vec![
+                "look", "accent", "text_scale", "high_contrast", "screen_reader",
+                "crash_reports", "keyboard", "layout", "variant",
+            ]).prop_map(String::from),
+            1 => any::<String>(),
+        ]
+    }
+
+    fn scalar() -> impl Strategy<Value = Value> {
+        prop_oneof![
+            2 => prop::sample::select(vec![
+                "light", "dark", "us", "dvorak", "#6858E2", "#e93a9a", "#000000", "1.0",
+                "1.25", "1.5", "", "../x", "-x", "a\nb",
+            ]).prop_map(|s| Value::Str(s.into())),
+            1 => any::<String>().prop_map(Value::Str),
+            1 => any::<bool>().prop_map(Value::Bool),
+            2 => prop_oneof![
+                Just(1.0), Just(1.25), Just(1.5), Just(f64::NAN), Just(f64::INFINITY),
+                Just(-0.0), any::<f64>(),
+            ].prop_map(Value::F64),
+        ]
+    }
+
+    fn value() -> impl Strategy<Value = Value> {
+        scalar().prop_recursive(3, 24, 6, |inner| {
+            prop::collection::btree_map(key(), inner, 0..5).prop_map(Value::Map)
+        })
+    }
+
+    fn known(k: &str) -> bool {
+        matches!(
+            k,
+            "look"
+                | "accent"
+                | "text_scale"
+                | "high_contrast"
+                | "screen_reader"
+                | "crash_reports"
+                | "keyboard"
+        )
+    }
+
+    proptest! {
+        /// Never panics on any map; a key that is not a choice is always
+        /// refused; what is accepted is one of the offered values.
+        #[test]
+        fn accepted_choices_are_the_offered_ones(
+            m in prop::collection::btree_map(key(), value(), 0..8)
+        ) {
+            let r = validate(&m);
+            if m.keys().any(|k| !known(k)) {
+                prop_assert!(r.is_err());
+            }
+            if let Ok(c) = r {
+                prop_assert!(ACCENTS.contains(&c.accent));
+                prop_assert!([1.0, 1.25, 1.5].contains(&c.text_scale.factor()));
+                prop_assert!(c.look.theme_id().starts_with("org.telamon."));
+                if let Some(k) = c.keyboard {
+                    prop_assert!(xkb_layout(&k.layout) && xkb_variant(&k.variant));
+                }
+            }
+        }
+
+        /// The XKB name checks never panic; what they accept is a short
+        /// lower-case word that is neither empty (layout) nor holds a
+        /// separator, space or control character.
+        #[test]
+        fn xkb_names_are_plain_words(s in any::<String>()) {
+            if xkb_layout(&s) {
+                prop_assert!((1..=32).contains(&s.len()));
+                prop_assert!(s.bytes().all(|b| b.is_ascii_lowercase()
+                    || b.is_ascii_digit() || b == b'_' || b == b'-'));
+                prop_assert!(s.as_bytes()[0].is_ascii_alphanumeric(), "never an option");
+            }
+            prop_assert_eq!(xkb_variant(&s), s.is_empty() || xkb_layout(&s));
+        }
+    }
+
+    #[test]
+    fn nasty_choices() {
+        let big = "x".repeat(10 * 1024 * 1024);
+        for (k, v) in [
+            ("look", Value::Str(big.clone())),
+            ("accent", Value::Str(big.clone())),
+            (
+                "keyboard",
+                Value::Map(BTreeMap::from([("layout".into(), Value::Str(big))])),
+            ),
+            ("text_scale", Value::F64(f64::NAN)),
+            ("text_scale", Value::F64(1.0000001)),
+            ("keyboard", Value::Map(BTreeMap::new())),
+            ("keyboard", Value::Str("us".into())),
+            (
+                "keyboard",
+                Value::Map(BTreeMap::from([
+                    ("layout".into(), Value::Str("us".into())),
+                    ("extra".into(), Value::Bool(true)),
+                ])),
+            ),
+            (
+                "keyboard",
+                Value::Map(BTreeMap::from([(
+                    "layout".into(),
+                    Value::Str("us\nExec=x".into()),
+                )])),
+            ),
+            ("accent", Value::Str("#6858E2\n".into())),
+        ] {
+            assert!(validate([(k, v)]).is_err(), "{k}");
+        }
+        assert!(validate([("a\0b", Value::Bool(true))]).is_err());
+        // a layout or variant that reads as an option or a path
+        for bad in ["-x", "--help", "_x", "-", "../x", "us/../x"] {
+            assert!(!xkb_layout(bad), "{bad}");
+            assert!(!xkb_variant(bad), "{bad}");
+        }
+        assert!(
+            xkb_layout("us") && xkb_layout("3l") && xkb_variant("") && xkb_variant("dvorak-intl")
+        );
     }
 }

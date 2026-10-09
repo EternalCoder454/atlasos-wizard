@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/wizard-core", "crates/wizard-boot", "crates/wizard-helper", "apps/telamon-wizard"]
 
 [workspace.package]
-version = "0.2.3"
+version = "0.3.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/EternalCoder454/atlasos-wizard"
@@ -32,3 +32,6 @@ zeroize = "1"
 lto = "thin"
 codegen-units = 4
 strip = true
+# Root code: an arithmetic overflow is a panic, never a silent wrap (docs/SECURITY.md,
+# "Build hardening").
+overflow-checks = true

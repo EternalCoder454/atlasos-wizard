@@ -53,3 +53,37 @@ impl Ini {
             .filter(|v| !v.is_empty())
     }
 }
+
+#[cfg(test)]
+mod props {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        /// Never panics; every key it returns was read from some line of the
+        /// text, trimmed and non-empty; a `[locale]` key is never returned.
+        #[test]
+        fn parse_never_panics_and_get_is_trimmed(
+            t in "(([A-Za-z\\[\\]=# ;\\r\\u{feff}]|\\n){0,60})",
+            raw in any::<String>(),
+        ) {
+            for text in [&t, &raw] {
+                let ini = Ini::parse(text);
+                for g in ["Setup", "Installer", ""] {
+                    for k in ["Version", "Finished", "Language"] {
+                        if let Some(v) = ini.get(g, k) {
+                            prop_assert!(!v.is_empty() && v == v.trim());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn many_lines() {
+        let big = "[Setup]\n".to_string() + &"k=v\n".repeat(1_000_000);
+        assert_eq!(Ini::parse(&big).get("Setup", "k"), Some("v"));
+        assert_eq!(Ini::parse("[Setup]\nk[de]=v\n").get("Setup", "k"), None);
+    }
+}

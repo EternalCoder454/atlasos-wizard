@@ -26,6 +26,34 @@ pub const RESERVED_NAMES: &[&str] = &[
     "plasmalogin",
     "sddm",
     "gdm",
+    // Accounts and groups that packages create (now, or in a later image
+    // update, when a sysusers entry of that name would collide with the
+    // person's account) and whose names must stay the system's.
+    "sys",
+    "uucp",
+    "news",
+    "man",
+    "proxy",
+    "backup",
+    "list",
+    "irc",
+    "www-data",
+    "dbus",
+    "polkitd",
+    "sshd",
+    "avahi",
+    "chrony",
+    "tss",
+    "rtkit",
+    "colord",
+    "geoclue",
+    "flatpak",
+    "pipewire",
+    "cups",
+    "users",
+    "sudo",
+    "nogroup",
+    "nfsnobody",
 ];
 
 /// Reserved prefix: every `systemd-*` name is refused.
@@ -426,6 +454,189 @@ mod tests {
         ] {
             let n = derive_user_name(s);
             assert!(n.is_empty() || user_name(&n).is_ok(), "{s} -> {n}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod props {
+    use super::*;
+    use proptest::prelude::*;
+
+    /// Characters that have broken parsers before: separators, controls,
+    /// bidi and zero-width, joiners, combining marks, the last code point.
+    fn nasty_char() -> impl Strategy<Value = char> {
+        prop_oneof![
+            4 => any::<char>(),
+            4 => prop::sample::select(vec![
+                ':', ',', '=', '\n', '\r', '\t', '\0', '/', '\\', '.', '-', '_', ' ', '$',
+                '\u{7f}', '\u{85}', '\u{2028}', '\u{202e}', '\u{2066}', '\u{200b}', '\u{200d}',
+                '\u{feff}', '\u{e0041}', '\u{301}', '\u{10ffff}', 'a', 'z', '0', '9',
+            ]),
+        ]
+    }
+
+    fn nasty_string(max: usize) -> impl Strategy<Value = String> {
+        prop::collection::vec(nasty_char(), 0..max).prop_map(|v| v.into_iter().collect())
+    }
+
+    proptest! {
+        /// Never panics, and an accepted name has the safe shape: 1 to 32
+        /// bytes of `[a-z0-9_-]`, not starting with a digit or `-`, so it
+        /// cannot be an option, a path, a number or a second field.
+        #[test]
+        fn user_name_accepts_only_the_safe_shape(s in nasty_string(48)) {
+            if user_name(&s).is_ok() {
+                prop_assert!((1..=USER_NAME_MAX).contains(&s.len()));
+                let b = s.as_bytes();
+                prop_assert!(b[0].is_ascii_lowercase() || b[0] == b'_');
+                prop_assert!(b.iter().all(|c| c.is_ascii_lowercase()
+                    || c.is_ascii_digit() || *c == b'_' || *c == b'-'));
+                prop_assert!(!RESERVED_NAMES.contains(&s.as_str()));
+                prop_assert!(!s.starts_with(RESERVED_PREFIX));
+            }
+        }
+
+        /// Names made only of allowed characters are accepted unless too
+        /// long, reserved, or badly started (nothing allowed is refused).
+        #[test]
+        fn user_name_refuses_nothing_it_should_accept(s in "[a-z_][a-z0-9_-]{0,31}") {
+            let reserved = RESERVED_NAMES.contains(&s.as_str()) || s.starts_with(RESERVED_PREFIX);
+            prop_assert_eq!(user_name(&s).is_ok(), !reserved);
+        }
+
+        /// Never panics on any text; what it accepts is trimmed, within
+        /// 255 bytes and free of every character that could end the field,
+        /// start another or disguise the name; accepting it again is the
+        /// same answer.
+        #[test]
+        fn full_name_accepts_only_the_safe_shape(s in nasty_string(300)) {
+            if let Ok(n) = full_name(&s) {
+                prop_assert!(n.len() <= FULL_NAME_MAX);
+                prop_assert_eq!(n, n.trim());
+                let clean = n.chars().all(|c| !c.is_control()
+                    && !matches!(c, ':' | ',' | '=' | '\u{2028}' | '\u{2029}')
+                    && !disguising(c));
+                prop_assert!(clean);
+                prop_assert_eq!(full_name(n), Ok(n));
+            }
+        }
+
+        /// A proposal is empty or a name `user_name` accepts.
+        #[test]
+        fn derived_names_are_empty_or_valid(s in nasty_string(80)) {
+            let n = derive_user_name(&s);
+            prop_assert!(n.is_empty() || user_name(&n).is_ok(), "{s:?} -> {n:?}");
+        }
+
+        /// The passwd/group reader never panics on any bytes.
+        #[test]
+        fn name_listed_never_panics(
+            bytes in prop::collection::vec(any::<u8>(), 0..400),
+            name in nasty_string(12),
+        ) {
+            let _ = name_listed(&name, &bytes[..]);
+        }
+    }
+
+    #[test]
+    fn accounts_that_packages_create_are_reserved() {
+        for n in [
+            "sshd",
+            "dbus",
+            "polkitd",
+            "sys",
+            "sudo",
+            "www-data",
+            "avahi",
+            "chrony",
+            "tss",
+            "rtkit",
+            "pipewire",
+            "flatpak",
+            "users",
+            "nogroup",
+            "root",
+            "nobody",
+            "telamon-setup",
+            "atlas-setup",
+        ] {
+            assert_eq!(user_name(n), Err(NameError::Reserved), "{n}");
+        }
+        // and a name that only starts like one is a person's
+        for n in ["sshd2", "dbus-x", "mary", "sysadmin"] {
+            assert_eq!(user_name(n), Ok(()), "{n}");
+        }
+    }
+
+    #[test]
+    fn nasty_names() {
+        let big = "a".repeat(10 * 1024 * 1024);
+        let cases = [
+            "ada\n",
+            "ada\nroot",
+            "ada\0",
+            "\0",
+            "ada:x:0:0",
+            "..",
+            "../etc",
+            "a/b",
+            "-rf",
+            "--root=/",
+            "-",
+            "ada ",
+            " ada",
+            "ADA",
+            "ada\u{202e}",
+            "аda", // a Cyrillic а
+            "ada$",
+            "123",
+            "0",
+            "root",
+            "ROOT",
+            "root ",
+            "systemd-network",
+            big.as_str(),
+        ];
+        for c in cases {
+            assert!(user_name(c).is_err(), "{:?}", &c[..c.len().min(20)]);
+        }
+    }
+
+    #[test]
+    fn nasty_full_names() {
+        for c in [
+            "Ada\nroot::0:0",
+            "Ada\0",
+            "root:x:0:0:Ada",
+            "Ada,,,,",
+            "role=admin",
+            "Ada \u{202e}Lovelace",
+            "Ada\u{2028}Lovelace",
+            "Ada\u{85}Lovelace",
+            "Ada\u{e0041}",
+        ] {
+            assert!(full_name(c).is_err(), "{c:?}");
+        }
+        let big = "é".repeat(10 * 1024 * 1024 / 2);
+        assert_eq!(full_name(&big), Err(FullNameError::TooLong));
+        assert_eq!(full_name(&" ".repeat(10 * 1024 * 1024)), Ok(""));
+        // a leading dash is a name, not an option: `useradd -c <it> -- user`
+        assert_eq!(full_name("-rf /"), Ok("-rf /"));
+    }
+
+    #[test]
+    fn the_reserved_list_is_itself_valid_names() {
+        for n in RESERVED_NAMES {
+            let b = n.as_bytes();
+            assert!(
+                b[0].is_ascii_lowercase()
+                    && b.iter().all(|c| c.is_ascii_lowercase()
+                        || c.is_ascii_digit()
+                        || *c == b'_'
+                        || *c == b'-'),
+                "{n} could never be typed as a name, so reserving it does nothing"
+            );
         }
     }
 }

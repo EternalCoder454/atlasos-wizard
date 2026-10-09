@@ -192,3 +192,50 @@ mod tests {
         assert_eq!(normal.matches("features = [\"test-root\"]").count(), 0);
     }
 }
+
+#[cfg(test)]
+mod props {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        /// A path with no `..` stays under the root, absolute or not, and
+        /// the fixed names are all under it too.
+        #[test]
+        fn join_never_leaves_the_root(
+            parts in prop::collection::vec(
+                prop::sample::select(vec!["etc", "passwd", "", ".", "x y", "-a", "\u{202e}", "a\nb"]), 0..6),
+            absolute in any::<bool>(),
+        ) {
+            let p = Paths::with_root("/tmp/r");
+            let rel = parts.join("/");
+            let arg = if absolute { format!("/{rel}") } else { rel };
+            let joined = p.join(&arg);
+            prop_assert!(joined.starts_with("/tmp/r"), "{joined:?}");
+            prop_assert!(joined.components().all(|c| c != std::path::Component::ParentDir));
+        }
+    }
+
+    #[test]
+    fn every_fixed_path_is_under_the_root() {
+        let p = Paths::with_root("/tmp/r");
+        for f in [
+            p.state(),
+            p.passwd(),
+            p.group(),
+            p.setup_autologin(),
+            p.legacy_setup_autologin(),
+            p.user_autologin(),
+        ] {
+            assert!(f.starts_with("/tmp/r"), "{f:?}");
+        }
+        // and the release paths are the system's
+        let s = Paths::system();
+        assert_eq!(s.passwd(), Path::new("/etc/passwd"));
+        assert_eq!(s.state(), Path::new("/var/lib/telamon-wizard/state.json"));
+        assert_eq!(
+            s.user_autologin(),
+            Path::new("/etc/plasmalogin.conf.d/50-telamon-autologin.conf")
+        );
+    }
+}

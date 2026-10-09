@@ -506,3 +506,115 @@ mod tests {
         assert_eq!(decide(&i), decide(&i));
     }
 }
+
+#[cfg(test)]
+mod props {
+    use super::*;
+    use crate::state::Account;
+    use proptest::prelude::*;
+
+    fn word() -> impl Strategy<Value = String> {
+        prop_oneof![
+            3 => prop::sample::select(vec![
+                "telamon.wizard=skip", "telamon.wizard=fallback", "atlas.wizard=skip",
+                "atlas.wizard=fallback", "telamon.wizard=", "telamon.wizard=SKIP",
+                "xtelamon.wizard=skip", "telamon.wizard=skip,fallback", "quiet", "ro",
+                "root=/dev/sda2", "rd.live.image",
+            ]).prop_map(String::from),
+            1 => any::<String>(),
+        ]
+    }
+
+    fn stage() -> impl Strategy<Value = Stage> {
+        prop_oneof![
+            Just(Stage::Creating),
+            Just(Stage::Created),
+            Just(Stage::PasswordSet),
+            Just(Stage::Verified),
+            any::<String>().prop_map(Stage::Unknown),
+        ]
+    }
+
+    fn input() -> impl Strategy<Value = BootInput> {
+        (
+            (any::<bool>(), any::<bool>(), any::<bool>()),
+            prop::sample::select(vec![Cmdline::None, Cmdline::Skip, Cmdline::Fallback]),
+            prop::collection::vec(("[a-z]{1,4}", 0u32..70000), 0..3),
+            (
+                0u32..6,
+                any::<bool>(),
+                prop::option::of(("[a-z]{1,4}", 0u32..70000, stage())),
+                prop::option::of(Just("markers".to_string())),
+            ),
+            any::<bool>(),
+        )
+            .prop_map(
+                |((t, a, p), cmdline, humans, (boots, gave_up, acct, finish), v)| BootInput {
+                    markers: Present {
+                        telamon: t,
+                        atlas: a,
+                        plasma: p,
+                    },
+                    cmdline,
+                    humans: humans
+                        .into_iter()
+                        .map(|(name, uid)| Human { name, uid })
+                        .collect(),
+                    state: State {
+                        boots,
+                        gave_up,
+                        account: acct.map(|(name, uid, stage)| Account { name, uid, stage }),
+                        finish,
+                        ..State::default()
+                    },
+                    state_account_verifies: v,
+                },
+            )
+    }
+
+    proptest! {
+        /// Never panics on any command line; a value is only ever taken
+        /// from a word that is exactly `telamon.wizard=` or `atlas.wizard=`
+        /// plus the value.
+        #[test]
+        fn cmdline_values_come_only_from_exact_words(
+            words in prop::collection::vec(word(), 0..8),
+            sep in prop::sample::select(vec![" ", "\n", "\t", "  "]),
+        ) {
+            let line = words.join(sep);
+            let got = parse_cmdline(&line);
+            let has = |w: &str| line.split_whitespace().any(|x| x == w);
+            match got {
+                Cmdline::Skip => prop_assert!(has("telamon.wizard=skip") || has("atlas.wizard=skip")),
+                Cmdline::Fallback => {
+                    prop_assert!(has("telamon.wizard=fallback") || has("atlas.wizard=fallback"));
+                }
+                Cmdline::None => {}
+            }
+        }
+
+        /// The decision is total, and a command line can neither create an
+        /// account nor reopen setup: with a done marker only the clean-up
+        /// runs; `skip` marks done only when an account already exists;
+        /// without a marker nothing is cleaned up as if finished unless an
+        /// account exists.
+        #[test]
+        fn the_decision_never_depends_on_the_command_line_for_an_account(i in input()) {
+            let a = decide(&i);
+            let cleanup = matches!(a, BootAction::Cleanup { .. });
+            prop_assert_eq!(cleanup, i.markers.any());
+            if matches!(a, BootAction::MarkDoneAndCleanup) {
+                prop_assert!(!i.humans.is_empty());
+            }
+            if matches!(a, BootAction::FinishWithDefaults) {
+                prop_assert!(i.state.account.is_some());
+            }
+            let mut skip = i.clone();
+            skip.cmdline = Cmdline::Skip;
+            if i.humans.is_empty() && !i.markers.any() {
+                // `skip` with no account changes nothing
+                prop_assert_eq!(decide(&skip), decide(&BootInput { cmdline: Cmdline::None, ..i.clone() }));
+            }
+        }
+    }
+}

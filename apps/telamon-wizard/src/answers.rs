@@ -184,3 +184,49 @@ mod tests {
         assert_eq!(Answers::load(&dir.path().join("none")), Answers::default());
     }
 }
+
+#[cfg(test)]
+mod props {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        /// The file is only ours by name: whatever bytes it holds, loading
+        /// never panics, and anything loaded passes the helper's rules.
+        #[test]
+        fn any_json_gives_answers_the_helper_accepts(t in any::<String>(), look in any::<String>(), accent in any::<String>(), scale in any::<f64>()) {
+            if let Ok(a) = Answers::from_json(&t) {
+                prop_assert!(wizard_core::choices::validate(a.choices()).is_ok());
+            }
+            let doc = serde_json::json!({"look": look, "accent": accent, "textScale": scale, "keyboardLayout": "../x"}).to_string();
+            if let Ok(a) = Answers::from_json(&doc) {
+                prop_assert!(a.look == "light" || a.look == "dark");
+                prop_assert!(ACCENTS.iter().any(|c| c.eq_ignore_ascii_case(&a.accent)));
+                prop_assert!([1.0, 1.25, 1.5].contains(&a.text_scale));
+            }
+        }
+    }
+
+    proptest! {
+        /// A file of any bytes, or one far over the cap, loads as defaults or
+        /// as clean answers, and saving what was loaded reads back the same.
+        #[test]
+        fn load_survives_any_file(bytes in prop::collection::vec(any::<u8>(), 0..400), big in any::<bool>()) {
+            static RUNS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            if !crate::budget::within(&RUNS, 100) {
+                return Ok(());
+            }
+            let d = tempfile::tempdir().unwrap();
+            let p = d.path().join("answers.json");
+            let mut b = bytes;
+            if big {
+                b.resize(MAX_BYTES as usize * 2, b' ');
+            }
+            std::fs::write(&p, &b).unwrap();
+            let a = Answers::load(&p);
+            prop_assert!(wizard_core::choices::validate(a.choices()).is_ok());
+            a.save(&p).unwrap();
+            prop_assert_eq!(Answers::load(&p), a);
+        }
+    }
+}
