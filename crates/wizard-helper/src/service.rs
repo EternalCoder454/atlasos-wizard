@@ -256,14 +256,23 @@ pub fn setup_uid(paths: &Paths) -> Option<u32> {
         .map(|e| e.uid)
 }
 
+/// Most variants inside variants that are looked through. The bus library
+/// bounds what it will parse, but this code must not rely on that: it
+/// recurses on what it is given.
+const MAX_VARIANT_NEST: u8 = 4;
+
 /// Converts a D-Bus value into a choices value (strings, booleans, numbers and
 /// one level of `a{sv}`); anything else is refused.
 fn to_choice(v: &Value<'_>, depth: u8) -> Option<Choice> {
+    to_choice_nested(v, depth, 0)
+}
+
+fn to_choice_nested(v: &Value<'_>, depth: u8, nest: u8) -> Option<Choice> {
     match v {
         Value::Str(s) => Some(Choice::Str(s.as_str().to_string())),
         Value::Bool(b) => Some(Choice::Bool(*b)),
         Value::F64(f) => Some(Choice::F64(*f)),
-        Value::Value(inner) => to_choice(inner, depth),
+        Value::Value(inner) if nest < MAX_VARIANT_NEST => to_choice_nested(inner, depth, nest + 1),
         Value::Dict(d) if depth < 2 => {
             let mut out = BTreeMap::new();
             for (k, v) in d.iter() {
@@ -271,7 +280,10 @@ fn to_choice(v: &Value<'_>, depth: u8) -> Option<Choice> {
                 if out.len() >= MAX_CHOICE_KEYS {
                     return None;
                 }
-                out.insert(k.as_str().to_string(), to_choice(v, depth + 1)?);
+                out.insert(
+                    k.as_str().to_string(),
+                    to_choice_nested(v, depth + 1, nest)?,
+                );
             }
             Some(Choice::Map(out))
         }
@@ -469,9 +481,97 @@ mod tests {
         let mut bad = HashMap::new();
         bad.insert("look".to_string(), ok(Value::from(7u32)));
         assert!(choices_from_dbus(&bad).is_err());
+        // a variant inside a variant inside a variant ...: refused past a few
+        // levels instead of recursing as deep as it is made
+        let mut nested = Value::from(true);
+        for _ in 0..MAX_VARIANT_NEST {
+            nested = Value::Value(Box::new(nested));
+        }
+        assert_eq!(to_choice(&nested, 0), Some(Choice::Bool(true)));
+        for _ in 0..50_000 {
+            nested = Value::Value(Box::new(nested));
+        }
+        assert_eq!(to_choice(&nested, 0), None);
+        std::mem::forget(nested); // dropping 50,000 levels recurses too; the test is about to_choice
         let many: HashMap<String, OwnedValue> = (0..40)
             .map(|i| (format!("k{i}"), ok(Value::from(true))))
             .collect();
         assert!(choices_from_dbus(&many).is_err());
+    }
+}
+
+#[cfg(test)]
+mod props {
+    use super::*;
+    use proptest::prelude::*;
+    use zbus::zvariant::Dict;
+
+    fn value() -> impl Strategy<Value = Value<'static>> {
+        let leaf = prop_oneof![
+            any::<String>().prop_map(Value::from),
+            any::<bool>().prop_map(Value::from),
+            any::<f64>().prop_map(Value::from),
+            any::<u32>().prop_map(Value::from),
+            any::<i64>().prop_map(Value::from),
+            prop::collection::vec(any::<u8>(), 0..8).prop_map(Value::from),
+        ];
+        leaf.prop_recursive(6, 40, 5, |inner| {
+            prop_oneof![
+                inner.clone().prop_map(|v| Value::Value(Box::new(v))),
+                prop::collection::vec(("[a-z_]{0,8}", inner), 0..5).prop_map(|kv| {
+                    let m: HashMap<String, Value<'static>> = kv.into_iter().collect();
+                    Value::Dict(Dict::from(m))
+                }),
+            ]
+        })
+    }
+
+    /// How deep a converted value goes.
+    fn depth(c: &Choice) -> usize {
+        match c {
+            Choice::Map(m) => 1 + m.values().map(depth).max().unwrap_or(0),
+            _ => 0,
+        }
+    }
+
+    proptest! {
+        /// A hostile `a{sv}` (any nesting of variants and dicts, any value
+        /// types) never panics the converter; what it accepts holds only
+        /// strings, booleans, numbers and at most one level of map with at
+        /// most 16 keys.
+        #[test]
+        fn hostile_variants_convert_or_are_refused(
+            kv in prop::collection::vec(("[a-z_]{0,12}", value()), 0..20),
+        ) {
+            let m: HashMap<String, OwnedValue> = kv
+                .into_iter()
+                .filter_map(|(k, v)| OwnedValue::try_from(v).ok().map(|v| (k, v)))
+                .collect();
+            if let Ok(c) = choices_from_dbus(&m) {
+                prop_assert!(c.len() <= MAX_CHOICE_KEYS);
+                for v in c.values() {
+                    prop_assert!(depth(v) <= 2);
+                    if let Choice::Map(inner) = v {
+                        prop_assert!(inner.len() <= MAX_CHOICE_KEYS);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn deeply_nested_and_huge_values() {
+        let mut v = Value::from("x");
+        for _ in 0..100_000 {
+            v = Value::Value(Box::new(v));
+        }
+        assert_eq!(to_choice(&v, 0), None);
+        std::mem::forget(v);
+        let big = Value::from("a".repeat(10 * 1024 * 1024));
+        let mut m = HashMap::new();
+        m.insert("look".to_string(), OwnedValue::try_from(big).unwrap());
+        // converted (it is a string), and refused later by the value rules
+        let c = choices_from_dbus(&m).unwrap();
+        assert!(wizard_core::choices::validate(&c).is_err());
     }
 }

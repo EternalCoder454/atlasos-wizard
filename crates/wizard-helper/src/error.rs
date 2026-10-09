@@ -157,3 +157,57 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod codes {
+    //! The GUI splits `<code>: <text>` on the first `: ` and takes a code of
+    //! lower-case words and digits joined by `-`: every code this crate
+    //! writes literally must have that shape.
+    fn literal_codes(src: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        for ctor in [
+            "HelperError::invalid(",
+            "HelperError::failed(",
+            "HelperError::accounts(",
+            "HelperError::not_authorized(",
+            "HelperError::new(",
+        ] {
+            let mut rest = src;
+            while let Some(i) = rest.find(ctor) {
+                rest = &rest[i + ctor.len()..];
+                let after = rest.trim_start();
+                // `HelperError::new(Kind::X, "code", ...)`: skip the kind
+                let after = if ctor.ends_with("new(") {
+                    after.split_once(',').map_or("", |(_, r)| r.trim_start())
+                } else {
+                    after
+                };
+                if let Some(lit) = after.strip_prefix('"') {
+                    out.push(lit.split('"').next().unwrap().to_string());
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn literal_codes_have_the_shape_the_gui_splits_on() {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/src/");
+        let mut n = 0;
+        for f in ["core.rs", "service.rs", "backends.rs", "apply.rs"] {
+            let text = std::fs::read_to_string(format!("{dir}{f}")).unwrap();
+            let prod = text.split("\n#[cfg(test)]").next().unwrap();
+            for code in literal_codes(prod) {
+                n += 1;
+                assert!(
+                    (1..=48).contains(&code.len())
+                        && code
+                            .chars()
+                            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'),
+                    "{f}: {code:?}"
+                );
+            }
+        }
+        assert!(n > 20, "found only {n} codes: the scan is broken");
+    }
+}

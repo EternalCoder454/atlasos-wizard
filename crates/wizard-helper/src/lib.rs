@@ -18,6 +18,9 @@
 #[cfg(all(feature = "test-root", not(debug_assertions)))]
 compile_error!("the test-root feature is for test builds only, never a release build");
 
+#[cfg(test)]
+mod budget;
+
 pub mod apply;
 pub mod backends;
 pub mod core;

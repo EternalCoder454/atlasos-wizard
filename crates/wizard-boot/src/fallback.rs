@@ -256,6 +256,17 @@ fn create(
     state.account = Some(acct.clone());
     save(paths, state);
 
+    // `useradd -m` gives the home HOME_MODE, or 0755 under a login.defs
+    // without one: take group and other access away before any session of
+    // the account can exist.
+    match accounts::secure_home(paths.root(), user, uid) {
+        Ok(true) => log::info!("the new home was open to others; now 0700 or tighter"),
+        Ok(false) => {}
+        Err(e) => {
+            log::error!("securing the home of {user} failed: {}", e.code());
+            return failed(text::REASON_VERIFY, state);
+        }
+    }
     if let Err(e) = accounts::verify(paths.root(), user, uid) {
         log::error!("verify of {user} failed: {}", e.code());
         return failed(text::REASON_VERIFY, state);

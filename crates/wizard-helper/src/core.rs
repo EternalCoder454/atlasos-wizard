@@ -282,6 +282,20 @@ impl Core {
         drop(hash);
         self.account_stage(&mut st, &name, uid, Stage::PasswordSet)?;
 
+        // The home's mode is whatever HOME_MODE / UMASK gave (0755 on a
+        // system whose login.defs lacks HOME_MODE): take group and other
+        // access away before any session of the account can exist.
+        match accounts::secure_home(self.paths.root(), &name, uid) {
+            Ok(true) => log::info!("the new home was open to others; now 0700 or tighter"),
+            Ok(false) => {}
+            Err(e) => {
+                log::error!("securing the new home failed: {}", e.code());
+                return Err(HelperError::failed(
+                    e.code(),
+                    "The new account did not check out.",
+                ));
+            }
+        }
         accounts::verify(self.paths.root(), &name, uid).map_err(|e| {
             log::error!("verify failed: {}", e.code());
             HelperError::failed(e.code(), "The new account did not check out.")

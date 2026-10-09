@@ -870,6 +870,95 @@ async fn bad_input_never_reaches_accountsservice() {
     );
 }
 
+/// Hostile arguments from the setup user itself (a compromised GUI): huge
+/// strings and arrays, a flood of `Finish` keys, variants inside variants.
+/// Each is refused with an error, nothing reaches AccountsService or the
+/// tools, the helper stays up, and an ordinary call works afterwards.
+#[tokio::test]
+async fn hostile_arguments_are_refused_and_the_helper_survives() {
+    let Some(w) = World::new(Opts::default()).await else {
+        return;
+    };
+    let mb = |n: usize| "a".repeat(n * 1024 * 1024);
+    // CreateAccount: a 20 MB password, a 20 MB name, a 20 MB full name
+    for (name, full, pw) in [
+        (
+            "ada".to_string(),
+            "Ada".to_string(),
+            vec![b'x'; 20 * 1024 * 1024],
+        ),
+        (mb(20), "Ada".to_string(), PW.as_bytes().to_vec()),
+        ("ada".to_string(), mb(20), PW.as_bytes().to_vec()),
+        (
+            "ada\nroot".to_string(),
+            "Ada".to_string(),
+            PW.as_bytes().to_vec(),
+        ),
+        ("ada".to_string(), "Ada".to_string(), Vec::new()),
+    ] {
+        let e = w
+            .call("CreateAccount", &(name, full, pw, false))
+            .await
+            .unwrap_err();
+        assert!(err_name(&e, "Invalid"), "{e:?}");
+        assert!(e.1.len() < 200, "the answer does not echo the input");
+    }
+    // Finish: before any account, the argument is still looked at after the
+    // account check; so make the account first
+    w.create("ada", false).await.unwrap();
+    let calls_before = w.accounts_log().await;
+
+    // 300 keys, a 4 MB key, a 20 MB value, a variant 30 deep, a map in a map in a map
+    let many: HashMap<String, Value<'_>> = (0..300)
+        .map(|i| (format!("k{i}"), Value::from(true)))
+        .collect();
+    let e = w.call("Finish", &(many,)).await.unwrap_err();
+    assert!(
+        err_name(&e, "Invalid") && has_code(&e, "choices-bad-value"),
+        "{e:?}"
+    );
+
+    let mut huge_key: HashMap<String, Value<'_>> = HashMap::new();
+    huge_key.insert(mb(4), Value::from(true));
+    let e = w.call("Finish", &(huge_key,)).await.unwrap_err();
+    assert!(err_name(&e, "Invalid"), "{e:?}");
+
+    let mut huge_value: HashMap<&str, Value<'_>> = HashMap::new();
+    huge_value.insert("look", Value::from(mb(20)));
+    let e = w.finish(huge_value).await.unwrap_err();
+    assert!(err_name(&e, "Invalid"), "{e:?}");
+
+    let mut nested = Value::from("dark");
+    for _ in 0..30 {
+        nested = Value::Value(Box::new(nested));
+    }
+    let mut deep: HashMap<&str, Value<'_>> = HashMap::new();
+    deep.insert("look", nested);
+    let e = w.finish(deep).await.unwrap_err();
+    assert!(
+        err_name(&e, "Invalid") && has_code(&e, "choices-bad-value"),
+        "{e:?}"
+    );
+
+    let mut inner: HashMap<&str, Value<'_>> = HashMap::new();
+    inner.insert("layout", Value::from("us"));
+    let mut mid: HashMap<&str, Value<'_>> = HashMap::new();
+    mid.insert("layout", Value::Dict(Dict::from(inner)));
+    let mut maps: HashMap<&str, Value<'_>> = HashMap::new();
+    maps.insert("keyboard", Value::Dict(Dict::from(mid)));
+    let e = w.finish(maps).await.unwrap_err();
+    assert!(err_name(&e, "Invalid"), "{e:?}");
+
+    // nothing of that got further than the helper's own checks
+    assert_eq!(w.accounts_log().await, calls_before);
+    assert!(!w.tools_log().contains("TOOL"), "no tool ran");
+    assert!(!w.root.join("etc/telamon/setup-done").exists());
+    assert!(w.helper.is_some() && name_owned(&w.conn, BUS_NAME).await);
+    // and a normal Finish still works
+    w.finish(all_choices()).await.unwrap();
+    assert!(w.root.join("etc/telamon/setup-done").exists());
+}
+
 #[tokio::test]
 async fn a_half_made_account_is_cleaned_up_and_made_again() {
     let Some(w) = World::new(Opts::default()).await else {

@@ -31,6 +31,8 @@ struct FakeAccounts {
     hang_create: bool,
     delay: Duration,
     uid: u32,
+    /// The mode AccountsService leaves the new home in (HOME_MODE / UMASK).
+    home_mode: u32,
 }
 
 impl FakeAccounts {
@@ -107,6 +109,11 @@ impl AccountsApi for FakeAccounts {
             fs::create_dir_all(&home).unwrap();
             fs::write(home.join(".bashrc"), "").unwrap();
             let _ = std::os::unix::fs::chown(&home, Some(uid), Some(uid));
+            fs::set_permissions(
+                &home,
+                std::os::unix::fs::PermissionsExt::from_mode(self.home_mode),
+            )
+            .unwrap();
             Ok(format!("/org/freedesktop/Accounts/User{uid}"))
         })
     }
@@ -279,6 +286,7 @@ struct Opts {
     applier_fails: bool,
     limit: Option<Duration>,
     finish_limit: Option<Duration>,
+    home_mode: Option<u32>,
 }
 
 fn rig_with(o: Opts) -> Rig {
@@ -324,6 +332,7 @@ fn rig_with(o: Opts) -> Rig {
         hang_create: o.hang_create,
         delay: Duration::from_millis(o.delay_ms),
         uid: o.create_uid.unwrap_or_else(account_uid),
+        home_mode: o.home_mode.unwrap_or(0o755),
     });
     let systemd = Arc::new(FakeSystemd::default());
     let runner = Arc::new(FakeRunner {
@@ -436,6 +445,60 @@ async fn create_writes_the_stages_around_each_step() {
     // neither the password nor the hash is in the state
     let text = fs::read_to_string(r.core.paths().state()).unwrap();
     assert!(!text.contains(PW) && !text.contains(hash), "{text}");
+}
+
+/// Whatever mode AccountsService leaves the new home in (0755 when
+/// login.defs has no HOME_MODE, 0777 from a loose umask), it ends up private
+/// before the account is `verified`: no other account can read it, swap its
+/// files or add to them.
+#[tokio::test]
+async fn the_new_home_is_private_whatever_the_system_gave() {
+    use std::os::unix::fs::PermissionsExt;
+    for (given, want) in [
+        (0o755, 0o700),
+        (0o777, 0o700),
+        (0o775, 0o700),
+        (0o750, 0o700),
+        (0o700, 0o700),
+        (0o500, 0o500),
+    ] {
+        let r = rig_with(Opts {
+            home_mode: Some(given),
+            ..Opts::default()
+        });
+        r.create("ada", false).await.unwrap();
+        let mode = fs::metadata(r.dir.path().join("home/ada"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o7777;
+        assert_eq!(mode, want, "given {given:o}");
+        assert_eq!(r.state().account.unwrap().stage, Stage::Verified);
+    }
+}
+
+/// A home that someone made writable between the account's creation and
+/// Finish is not one the settings are written into.
+#[tokio::test]
+async fn finish_refuses_a_home_others_can_write() {
+    use std::os::unix::fs::PermissionsExt;
+    let r = rig();
+    r.create("ada", false).await.unwrap();
+    fs::set_permissions(
+        r.dir.path().join("home/ada"),
+        fs::Permissions::from_mode(0o777),
+    )
+    .unwrap();
+    let e = r.core.finish(choices(&[])).await.unwrap_err();
+    assert_eq!(
+        (e.kind, e.code.as_str()),
+        (Kind::Failed, "verify-home-writable")
+    );
+    assert!(
+        r.applier.reqs.lock().unwrap().is_empty(),
+        "no settings were written"
+    );
+    assert!(!markers::is_done(r.dir.path()));
 }
 
 #[tokio::test]
