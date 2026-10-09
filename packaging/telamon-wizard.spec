@@ -5,7 +5,7 @@
 %global debug_package %{nil}
 
 Name:           telamon-wizard
-Version:        0.2.3
+Version:        0.3.0
 Release:        1%{?dist}
 Summary:        Telamon Setup, the first-run wizard of Telamon OS
 License:        MIT
@@ -258,6 +258,27 @@ done
 # files when it is removed. /etc/telamon and /etc/atlasos are made by tmpfiles.d.
 
 %changelog
+* Thu Oct 08 2026 EternalHell <77252745+EternalCoder454@users.noreply.github.com> - 0.3.0-1
+- Secure phase. The threat model, the rules and the tests that hold them are in
+  docs/SECURITY.md.
+- The new account's home is made private (0700) by the helper and by the text-mode
+  setup, and setup refuses a home that others can write. Before, it kept the mode
+  useradd gave it (0755, or 0777 under a loose umask).
+- More system accounts are reserved as user names (sshd, dbus, polkitd, sudo, ...);
+  keyboard layout names can no longer start with - or _; the computer name
+  "localhost" and malformed time zone names are refused.
+- The helper refuses D-Bus values nested five levels or deeper (a hostile
+  value nested 100000 deep overflowed its stack) and the polkit rule no longer
+  grants two actions nothing used (NTP, Wi-Fi radio).
+- The GUI no longer writes the Wi-Fi name to the journal, copies the Wi-Fi password,
+  or leaves a core dump of the typed password (the setup session turns them off).
+- Build: the package build checks the programs' hardening (PIE, full RELRO, no
+  executable stack, stack protectors) and that none holds a test hook, and
+  fails without it; release builds panic on integer overflow; CI runs cargo-deny
+  and cargo-audit, property tests of the validators and parsers, the real
+  useradd, chpasswd and userdel in a container, and the polkit rule's test; the
+  dev image checks that the framework tag is still the locked commit.
+
 * Thu Oct 08 2026 EternalHell <77252745+EternalCoder454@users.noreply.github.com> - 0.2.3-1
 - Fix: the app used about 8% of a core with its window idle. The icon layers added in the last release
   were redrawn on every frame with Qt Quick's software renderer; a layer is live now only for a moment
