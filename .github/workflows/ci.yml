@@ -210,6 +210,15 @@ jobs:
         env:
           PROPTEST_CASES: "20000"
         run: cargo test --workspace --locked -- props
+      # The polkit rule that lets the setup user change the system's settings
+      # only while setup is not done, against a stub polkit.
+      - name: Polkit rule
+        run: node --test tests/helper/polkit-rules.test.mjs
+      # The real useradd, chpasswd, userdel and chage against wizard-core, in a
+      # throw-away root below /tmp (shadow-utils' -P); it refuses to run outside
+      # a container, and this job is in one.
+      - name: Real shadow-utils
+        run: tests/container/real-tools.sh
       - run: ccache --show-stats
       - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: github.ref == 'refs/heads/main' && steps.ccache.outputs.cache-hit != 'true'

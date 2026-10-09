@@ -33,6 +33,7 @@ int main(void) {
 }
 C
 
+# shellcheck disable=SC2054 # the commas are part of the linker option
 good=(-O2 -fPIE -pie -fstack-protector-strong -Wl,-z,relro,-z,now -Wl,-z,noexecstack)
 failures=0
 

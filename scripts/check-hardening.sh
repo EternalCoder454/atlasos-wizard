@@ -108,6 +108,7 @@ for f in "$@"; do
     fi
     for s in ${forbidden[@]+"${forbidden[@]}"}; do
         # As ASCII (std::env::var, qgetenv) or as UTF-16 (a QString literal).
+        # shellcheck disable=SC2001 # every character followed by a dot, for UTF-16
         wide=$(sed 's/./&./g' <<<"$s")
         if grep -aqF -- "$s" "$f" || LC_ALL=C grep -aq -- "$wide" "$f"; then
             bad "$f" "holds the string $s, which only the tests' builds may have"

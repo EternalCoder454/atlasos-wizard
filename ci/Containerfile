@@ -42,6 +42,7 @@ COPY packaging/telamon-wizard.spec /tmp/telamon-wizard.spec
 #   clippy, rustfmt      lint
 #   ShellCheck           lint of scripts/ and data/libexec/
 #   dbus-daemon, python3-dbusmock, accountsservice, polkit   helper bus tests
+#   nodejs               the polkit rule's test (tests/helper/polkit-rules.test.mjs)
 #   shadow-utils, passwd, util-linux, systemd                boot and helper tests
 #   cracklib-dicts       password strength tests (libpwquality's dictionary)
 #   Xvfb, qt6-qtbase-gui, kf6-qqc2-desktop-style             headless smoke run
@@ -49,7 +50,7 @@ COPY packaging/telamon-wizard.spec /tmp/telamon-wizard.spec
 RUN --mount=type=cache,target=/var/cache/libdnf5,sharing=locked \
     dnf -y --setopt=keepcache=1 install dnf5-plugins rpm-build git-core tar gzip zstd findutils \
         clippy rustfmt mold ccache ShellCheck desktop-file-utils \
-        dbus-daemon python3-dbusmock accountsservice polkit \
+        dbus-daemon python3-dbusmock accountsservice polkit nodejs \
         shadow-utils passwd util-linux systemd \
         libxcrypt-devel libpwquality-devel cracklib-dicts \
         xorg-x11-server-Xvfb qt6-qtbase-gui kf6-qqc2-desktop-style \
