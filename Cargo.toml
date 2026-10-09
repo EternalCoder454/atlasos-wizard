@@ -32,3 +32,6 @@ zeroize = "1"
 lto = "thin"
 codegen-units = 4
 strip = true
+# Root code: an arithmetic overflow is a panic, never a silent wrap (docs/SECURITY.md,
+# "Build hardening").
+overflow-checks = true
