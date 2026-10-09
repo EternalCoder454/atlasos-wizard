@@ -183,3 +183,34 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod props {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        /// Never panics on any message; a code is 1 to 48 characters of
+        /// `a-z0-9-` and the text is everything after the first `: `.
+        #[test]
+        fn split_message_takes_only_plain_codes(m in any::<String>(), code in "[a-z0-9-]{0,60}", text in any::<String>()) {
+            let f = split_message(&m);
+            prop_assert!(f.code == "failed" || (!f.code.is_empty() && f.code.len() <= 48
+                && f.code.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')));
+            let msg = format!("{code}: {text}");
+            let g = split_message(&msg);
+            if (1..=48).contains(&code.len()) {
+                prop_assert_eq!((g.code.as_str(), g.text.as_str()), (code.as_str(), text.as_str()));
+            } else {
+                prop_assert_eq!(g.code.as_str(), "failed");
+            }
+        }
+
+        /// Any D-Bus error name and message gives a code a page has text for.
+        #[test]
+        fn from_dbus_never_panics(name in any::<String>(), msg in any::<String>()) {
+            let f = from_dbus(&name, &msg);
+            prop_assert!(!f.code.is_empty());
+        }
+    }
+}

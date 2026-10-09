@@ -404,8 +404,9 @@ impl qobject::Backend {
         let (device, ap, ssid) = (device.to_string(), ap.to_string(), ssid.to_string());
         let password = Zeroizing::new(password.to_string());
         let sys = Arc::clone(&self.rust().sys);
-        // the SSID is not secret; the password is never logged
-        log::info!("wifi: connecting to {ssid:?}");
+        // neither the password nor the network's name goes to the journal (an
+        // SSID says where the person lives); only that a connection is tried
+        log::info!("wifi: connecting");
         self.run(
             "wifi",
             move || sys.wifi_connect(&device, &ap, &ssid, password, hidden),

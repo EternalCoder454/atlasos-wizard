@@ -30,6 +30,7 @@ zeroize.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+proptest = { version = "1", default-features = false, features = ["std"] }
 
 [build-dependencies]
 cxx-qt-build = "0.10"

@@ -3,6 +3,8 @@
 
 mod answers;
 mod backend;
+#[cfg(test)]
+mod budget;
 mod data;
 mod errors;
 mod system;
