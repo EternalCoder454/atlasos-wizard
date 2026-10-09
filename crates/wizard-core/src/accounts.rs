@@ -684,6 +684,38 @@ mod props {
         }
     }
 
+    /// The property above almost never draws a matching passwd and shadow; this
+    /// is the same rule on a table of hits and near-misses.
+    #[test]
+    fn humans_are_listed_by_uid_shell_and_hash() {
+        let hash = "$y$j9T$salt$hash";
+        let passwd = "\
+ada:x:1000:1000::/home/ada:/bin/bash
+low:x:999:999::/home/low:/bin/bash
+top:x:60000:60000::/home/top:/bin/zsh
+over:x:60001:60001::/home/over:/bin/bash
+svc:x:1001:1001::/home/svc:/usr/sbin/nologin
+nohash:x:1002:1002::/home/nohash:/bin/bash
+locked:x:1003:1003::/home/locked:/bin/bash
+empty:x:1004:1004::/home/empty:/bin/bash
+";
+        let shadow = format!(
+            "ada:{hash}:1::::::\nlow:{hash}:1::::::\ntop:{hash}:1::::::\nover:{hash}:1::::::\n\
+svc:{hash}:1::::::\nlocked:!{hash}:1::::::\nempty::1::::::\n"
+        );
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("etc")).unwrap();
+        std::fs::write(d.path().join("etc/passwd"), passwd).unwrap();
+        std::fs::write(d.path().join("etc/shadow"), shadow).unwrap();
+        let mut names: Vec<String> = human_accounts(d.path())
+            .unwrap()
+            .into_iter()
+            .map(|h| h.name)
+            .collect();
+        names.sort();
+        assert_eq!(names, ["ada", "top"]);
+    }
+
     #[test]
     fn nasty_files() {
         let huge = "ada:x:1000:1000::/home/ada:/bin/bash\n".repeat(300_000);

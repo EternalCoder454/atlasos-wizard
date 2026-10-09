@@ -204,8 +204,10 @@ jobs:
       - name: Tests
         run: cargo test --workspace --locked
       # The validators and parsers (user names, hostnames, locales, the state
-      # and installer.ini files, ...) with 20000 random cases each, not the
-      # 256 of a local run. The property tests are the ones named props.
+      # and installer.ini files, ...) with up to 20000 random cases each, not
+      # the 256 of a local run (a property that writes files or hashes with
+      # yescrypt stops at 4 to 300 of them). The property tests are the ones
+      # named props.
       - name: Property tests
         env:
           PROPTEST_CASES: "20000"
@@ -218,6 +220,8 @@ jobs:
       # throw-away root below /tmp (shadow-utils' -P); it refuses to run outside
       # a container, and this job is in one.
       - name: Real shadow-utils
+        env:
+          TELAMON_REAL_TOOLS_REQUIRE: "1"
         run: tests/container/real-tools.sh
       - run: ccache --show-stats
       - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

@@ -267,8 +267,8 @@ done
 - More system accounts are reserved as user names (sshd, dbus, polkitd, sudo, ...);
   keyboard layout names can no longer start with - or _; the computer name
   "localhost" and malformed time zone names are refused.
-- The helper refuses D-Bus values nested five levels or deeper (a hostile
-  value nested 100000 deep overflowed its stack) and the polkit rule no longer
+- The helper refuses D-Bus values nested five levels or deeper (an unbounded
+  nesting overflowed the stack in a unit test) and the polkit rule no longer
   grants two actions nothing used (NTP, Wi-Fi radio).
 - The GUI no longer writes the Wi-Fi name to the journal, copies the Wi-Fi password,
   or leaves a core dump of the typed password (the setup session turns them off).

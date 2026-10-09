@@ -101,14 +101,16 @@ NetworkManager, systemd, `shadow-utils`, `libxcrypt` or `libpwquality`.
 - **No existing-user takeover:** `CreateUser` fails on an existing name; the
   uid it returns must be in 1000..=60000. A half-made account from a crash is
   deleted (`userdel -r`) only when the state's uid equals passwd's, is in range,
-  the home holds only `/etc/skel`'s files and belongs to that uid, and, for the
+  the home holds only files named like `/etc/skel`'s (the fallback also compares owner,
+  type and content) and belongs to that uid, and, for the
   `creating` stage (which has no uid yet), the password hash is unusable.
 - **No empty-password window:** `useradd` leaves `!!`, AccountsService `!`; the
   yescrypt hash is set afterwards.
-- **The home is private:** `useradd` and AccountsService give 0755 (0777 under a loose
+- **The home is made private, best effort:** `useradd` and AccountsService give 0755 (0777 under a loose
   umask: confirmed with the real `useradd`). The helper and the fallback chmod it
   `go-rwx` through an fd checked to be that directory (not a symlink, owned by the
-  uid) (`accounts::secure_home`), and `verify` refuses a home others can write.
+  uid) (`accounts::secure_home`), and `verify` refuses a home others can write (a chmod that fails, say under an SELinux denial, is
+  logged and leaves a readable 0755 home; the fallback never blocks the last-resort account on it).
   *Tests:* `the_new_home_is_private_whatever_the_system_gave` (failed before the
   fix), `finish_refuses_a_home_others_can_write`, `real-tools.sh`.
 
@@ -214,7 +216,7 @@ set for boot and fallback, `SystemCallFilter`.
 | What | How |
 |---|---|
 | Unit, helper bus and boot tests | `scripts/dev.sh cargo test --workspace --locked` |
-| Property tests (20000 cases in CI) | `PROPTEST_CASES=20000 cargo test --workspace --locked -- props` |
+| Property tests (up to 20000 cases in CI; those that write files or hash with yescrypt stop at 4 to 300) | `PROPTEST_CASES=20000 cargo test --workspace --locked -- props` |
 | Shipped files, units, policy, logs | `tests/data` (part of `cargo test`) |
 | Polkit rule | `node --test tests/helper/polkit-rules.test.mjs` |
 | Real shadow-utils | `tests/container/real-tools.sh` (inside the dev container only) |

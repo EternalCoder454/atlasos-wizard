@@ -26,8 +26,11 @@
 # wizard-core`) to skip the build.
 set -euo pipefail
 
+# TELAMON_REAL_TOOLS_REQUIRE=1 (CI): a test that cannot run is a failure, not a
+# pass that tested nothing.
 skip() {
     echo "SKIP: $*"
+    [ "${TELAMON_REAL_TOOLS_REQUIRE:-}" = 1 ] && exit 1
     exit 0
 }
 
@@ -37,7 +40,9 @@ skip() {
 for t in useradd userdel chpasswd chage usermod awk; do
     command -v "$t" >/dev/null || skip "$t is not installed"
 done
-useradd --help 2>&1 | grep -q -- '--prefix' || skip "this useradd has no --prefix"
+# (read into a variable: `grep -q` ending the pipe early would fail it under pipefail)
+useradd_help=$(useradd --help 2>&1 || true)
+[[ $useradd_help == *--prefix* ]] || skip "this useradd has no --prefix"
 
 helper=${TELAMON_REAL_TOOLS_HELPER:-}
 if [ -z "$helper" ]; then
