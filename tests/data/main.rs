@@ -692,3 +692,14 @@ fn the_gui_logs_no_password_ssid_or_full_name() {
         "found only {seen} log statements: the scan is broken"
     );
 }
+
+#[test]
+fn the_wifi_passphrase_is_borrowed_into_the_call_not_copied() {
+    // `Value::from(String)` would leave a heap copy of the passphrase that
+    // nothing wipes; the zeroizing string is borrowed for the call instead
+    let text = read("apps/telamon-wizard/src/system.rs");
+    let prod = production_part(&text);
+    assert!(prod.contains("Value::from(password.as_str())"));
+    assert!(!prod.contains("password.as_str().to_string()"));
+    assert!(!prod.contains("password.clone()"));
+}

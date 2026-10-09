@@ -474,6 +474,12 @@ async fn the_new_home_is_private_whatever_the_system_gave() {
             & 0o7777;
         assert_eq!(mode, want, "given {given:o}");
         assert_eq!(r.state().account.unwrap().stage, Stage::Verified);
+        // so the temp dir can be removed again
+        fs::set_permissions(
+            r.dir.path().join("home/ada"),
+            fs::Permissions::from_mode(0o700),
+        )
+        .unwrap();
     }
 }
 

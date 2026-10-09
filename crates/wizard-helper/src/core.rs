@@ -288,13 +288,13 @@ impl Core {
         match accounts::secure_home(self.paths.root(), &name, uid) {
             Ok(true) => log::info!("the new home was open to others; now 0700 or tighter"),
             Ok(false) => {}
-            Err(e) => {
-                log::error!("securing the new home failed: {}", e.code());
-                return Err(HelperError::failed(
-                    e.code(),
-                    "The new account did not check out.",
-                ));
-            }
+            // `verify` below has the last word (a home that others can write
+            // is refused there); a chmod that fails must not by itself leave
+            // the machine without an account
+            Err(e) => log::error!(
+                "securing the new home failed: {}; checking it as it is",
+                e.code()
+            ),
         }
         accounts::verify(self.paths.root(), &name, uid).map_err(|e| {
             log::error!("verify failed: {}", e.code());

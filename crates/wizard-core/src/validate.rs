@@ -540,6 +540,36 @@ mod props {
     }
 
     #[test]
+    fn accounts_that_packages_create_are_reserved() {
+        for n in [
+            "sshd",
+            "dbus",
+            "polkitd",
+            "sys",
+            "sudo",
+            "www-data",
+            "avahi",
+            "chrony",
+            "tss",
+            "rtkit",
+            "pipewire",
+            "flatpak",
+            "users",
+            "nogroup",
+            "root",
+            "nobody",
+            "telamon-setup",
+            "atlas-setup",
+        ] {
+            assert_eq!(user_name(n), Err(NameError::Reserved), "{n}");
+        }
+        // and a name that only starts like one is a person's
+        for n in ["sshd2", "dbus-x", "mary", "sysadmin"] {
+            assert_eq!(user_name(n), Ok(()), "{n}");
+        }
+    }
+
+    #[test]
     fn nasty_names() {
         let big = "a".repeat(10 * 1024 * 1024);
         let cases = [

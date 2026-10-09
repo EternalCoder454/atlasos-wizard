@@ -123,7 +123,8 @@ fn fresh() -> Sys {
 #[test]
 fn creates_the_account_through_the_terminal() {
     if !is_root() {
-        return; // the new home must be chowned to the new uid
+        eprintln!("SKIP: needs root (the new home is chowned)");
+        return;
     }
     let s = fresh();
     let mut t = Term::new();
@@ -281,6 +282,7 @@ fn piped(s: &Sys, input: &str) -> Output {
 #[test]
 fn a_piped_script_works_without_a_terminal() {
     if !is_root() {
+        eprintln!("SKIP: needs root (the new home is chowned)");
         return;
     }
     let s = fresh();
@@ -314,6 +316,7 @@ fn add_half_made(s: &Sys, stage: &str) {
 #[test]
 fn a_half_made_account_is_deleted_before_asking() {
     if !is_root() {
+        eprintln!("SKIP: needs root (the new home is chowned)");
         return;
     }
     let s = fresh();
@@ -333,6 +336,7 @@ fn a_half_made_account_is_deleted_before_asking() {
 #[test]
 fn a_home_with_the_users_files_is_never_deleted() {
     if !is_root() {
+        eprintln!("SKIP: needs root (the new home is chowned)");
         return;
     }
     let s = fresh();
@@ -356,6 +360,7 @@ fn a_home_with_the_users_files_is_never_deleted() {
 #[test]
 fn an_account_that_exists_is_finished_without_asking() {
     if !is_root() {
+        eprintln!("SKIP: needs root (the new home is chowned)");
         return;
     }
     let s = fresh();
@@ -407,6 +412,7 @@ const CANARY: &str = "CANARY-pw-7f3a-Plum-Orbit";
 #[test]
 fn the_password_is_nowhere_after_a_run() {
     if !is_root() {
+        eprintln!("SKIP: needs root (the new home is chowned)");
         return;
     }
     let s = fresh();
@@ -522,6 +528,7 @@ fn a_password_sent_the_instant_the_prompt_shows_is_not_echoed() {
 #[test]
 fn a_piped_run_leaves_the_password_out_of_stdout_and_stderr() {
     if !is_root() {
+        eprintln!("SKIP: needs root (the new home is chowned)");
         return;
     }
     let s = fresh();
