@@ -50,16 +50,14 @@ polkit.addRule(function(action, subject) {
         // language and keyboard (localed)
         "org.freedesktop.locale1.set-locale",
         "org.freedesktop.locale1.set-keyboard",
-        // time zone and clock (timedated)
+        // time zone (timedated); the clock's NTP switch is not used, so not granted
         "org.freedesktop.timedate1.set-timezone",
-        "org.freedesktop.timedate1.set-ntp",
         // host name (hostnamed)
         "org.freedesktop.hostname1.set-static-hostname",
         "org.freedesktop.hostname1.set-hostname",
         // Wi-Fi (NetworkManager)
         "org.freedesktop.NetworkManager.settings.modify.system",
-        "org.freedesktop.NetworkManager.network-control",
-        "org.freedesktop.NetworkManager.enable-disable-wifi"
+        "org.freedesktop.NetworkManager.network-control"
     ];
     if (granted.indexOf(action.id) >= 0 &&
         subject.user == "telamon-setup" && subject.local && subject.active) {
