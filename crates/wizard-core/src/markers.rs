@@ -413,3 +413,49 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod props {
+    use super::*;
+    use proptest::prelude::*;
+    use std::time::{Duration, UNIX_EPOCH};
+
+    proptest! {
+        /// A hostile `Finished=` in Atlas Wizard's marker can never put a
+        /// second key, a line or a control character into ours.
+        #[test]
+        fn an_old_markers_text_cannot_inject_into_ours(finished in any::<String>()) {
+            static RUNS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            if !crate::budget::within(&RUNS, 100) {
+                return Ok(());
+            }
+            let d = tempfile::tempdir().unwrap();
+            fs::create_dir_all(d.path().join("etc/atlasos")).unwrap();
+            fs::write(
+                atlas_path(d.path()),
+                format!("[Setup]\nVersion=1\nFinished={finished}\n"),
+            )
+            .unwrap();
+            write_telamon(d.path(), UNIX_EPOCH + Duration::from_secs(1_791_201_600)).unwrap();
+            let text = fs::read_to_string(telamon_path(d.path())).unwrap();
+            prop_assert_eq!(text.lines().count(), 4, "{:?}", text);
+            let m = read_telamon(d.path()).unwrap().unwrap();
+            let f = m.finished.unwrap();
+            prop_assert!(f.len() <= 64 && f.chars().all(|c| c.is_ascii_graphic()));
+        }
+
+        /// Any bytes in a marker file: reading never panics.
+        #[test]
+        fn any_marker_content_reads_or_errors(bytes in prop::collection::vec(any::<u8>(), 0..300)) {
+            static RUNS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            if !crate::budget::within(&RUNS, 100) {
+                return Ok(());
+            }
+            let d = tempfile::tempdir().unwrap();
+            fs::create_dir_all(d.path().join("etc/telamon")).unwrap();
+            fs::write(telamon_path(d.path()), &bytes).unwrap();
+            let _ = read_telamon(d.path());
+            prop_assert!(is_done(d.path()));
+        }
+    }
+}

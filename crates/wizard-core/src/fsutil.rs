@@ -201,3 +201,96 @@ mod tests {
         assert!(write_atomic(Path::new("/"), b"x", 0o644).is_err());
     }
 }
+
+#[cfg(test)]
+mod props {
+    use super::*;
+    use proptest::prelude::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    proptest! {
+        /// Whatever the bytes and the mode: the file is exactly them with
+        /// exactly that mode, and no temporary file is left.
+        #[test]
+        fn write_atomic_writes_exactly(
+            data in prop::collection::vec(any::<u8>(), 0..2048),
+            mode in prop::sample::select(vec![0o600u32, 0o640, 0o644, 0o400]),
+        ) {
+            static RUNS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            if !crate::budget::within(&RUNS, 100) {
+                return Ok(());
+            }
+            let d = tempfile::tempdir().unwrap();
+            let p = d.path().join("sub/f");
+            write_atomic(&p, &data, mode).unwrap();
+            prop_assert_eq!(fs::read(&p).unwrap(), data);
+            prop_assert_eq!(fs::metadata(&p).unwrap().permissions().mode() & 0o7777, mode);
+            let names: Vec<_> = fs::read_dir(p.parent().unwrap()).unwrap()
+                .map(|e| e.unwrap().file_name()).collect();
+            prop_assert_eq!(names.len(), 1);
+        }
+
+        /// The clean-up of a crash's leftovers only ever removes plain
+        /// files whose name starts with a dot: never a directory, never
+        /// the visible files, never this process's own temp file.
+        #[test]
+        fn stale_temps_removal_is_narrow(
+            names in prop::collection::hash_set("[.a-z0-9-]{1,14}|\\.[a-z]{1,4}\\.tmp-[0-9]{1,3}-[0-9]{1,2}", 0..12),
+            as_dir in any::<bool>(),
+        ) {
+            static RUNS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            if !crate::budget::within(&RUNS, 100) {
+                return Ok(());
+            }
+            let d = tempfile::tempdir().unwrap();
+            let own = format!(".keep.tmp-{}-0", std::process::id());
+            fs::write(d.path().join(&own), "x").unwrap();
+            for n in &names {
+                let p = d.path().join(n);
+                if p.exists() { continue; }
+                if as_dir && n.contains(".tmp-") {
+                    fs::create_dir(&p).unwrap();
+                } else {
+                    fs::write(&p, "x").unwrap();
+                }
+            }
+            remove_stale_temps(d.path()).unwrap();
+            prop_assert!(d.path().join(&own).exists());
+            for n in &names {
+                let p = d.path().join(n);
+                if !n.starts_with('.') || (as_dir && n.contains(".tmp-")) {
+                    prop_assert!(p.exists(), "{n} must stay");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn nasty_paths() {
+        let d = tempfile::tempdir().unwrap();
+        let big = vec![0u8; 10 * 1024 * 1024];
+        write_atomic(&d.path().join("big"), &big, 0o600).unwrap();
+        assert_eq!(
+            fs::metadata(d.path().join("big")).unwrap().len(),
+            big.len() as u64
+        );
+        assert!(write_atomic(Path::new(""), b"x", 0o600).is_err());
+        assert!(write_atomic(&d.path().join(".."), b"x", 0o600).is_err());
+        // a symlink at the destination is replaced, never written through
+        let target = d.path().join("target");
+        fs::write(&target, "keep").unwrap();
+        std::os::unix::fs::symlink(&target, d.path().join("link")).unwrap();
+        write_atomic(&d.path().join("link"), b"new", 0o600).unwrap();
+        assert_eq!(fs::read_to_string(&target).unwrap(), "keep");
+        assert_eq!(fs::read_to_string(d.path().join("link")).unwrap(), "new");
+        // a symlink where the temp file would go does not redirect the write
+        let n = COUNTER.load(Ordering::Relaxed);
+        let pid = std::process::id();
+        for i in n..n + 4 {
+            let _ = std::os::unix::fs::symlink(&target, d.path().join(format!(".f.tmp-{pid}-{i}")));
+        }
+        write_atomic(&d.path().join("f"), b"safe", 0o600).unwrap();
+        assert_eq!(fs::read_to_string(&target).unwrap(), "keep");
+        assert_eq!(fs::read_to_string(d.path().join("f")).unwrap(), "safe");
+    }
+}

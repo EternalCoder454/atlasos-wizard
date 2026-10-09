@@ -545,3 +545,129 @@ mod tests {
         assert!(!j.contains("password"));
     }
 }
+
+#[cfg(test)]
+mod props {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn stage_name() -> impl Strategy<Value = String> {
+        prop_oneof![
+            prop::sample::select(vec![
+                "creating",
+                "created",
+                "password-set",
+                "verified",
+                "future-stage",
+                "",
+                "../../x",
+                "a\nb",
+            ])
+            .prop_map(String::from),
+            any::<String>(),
+        ]
+    }
+
+    fn state_text() -> impl Strategy<Value = String> {
+        (
+            prop::option::of(any::<u64>()),
+            prop::option::of(any::<i64>()),
+            prop::option::of((any::<String>(), any::<u64>(), stage_name())),
+            prop::option::of(any::<String>()),
+            any::<bool>(),
+        )
+            .prop_map(|(format, boots, account, finish, gave_up)| {
+                let mut m = serde_json::Map::new();
+                if let Some(f) = format {
+                    m.insert("format".into(), f.into());
+                }
+                if let Some(b) = boots {
+                    m.insert("boots".into(), b.into());
+                }
+                if let Some((name, uid, stage)) = account {
+                    m.insert(
+                        "account".into(),
+                        serde_json::json!({"name": name, "uid": uid, "stage": stage}),
+                    );
+                }
+                if let Some(f) = finish {
+                    m.insert("finish".into(), f.into());
+                }
+                m.insert("gave_up".into(), gave_up.into());
+                serde_json::Value::Object(m).to_string()
+            })
+    }
+
+    proptest! {
+        /// Never panics on any bytes or on JSON of the right shape with odd
+        /// values; what parses writes and reads back as the same state.
+        #[test]
+        fn any_bytes_parse_or_fail_and_what_parses_round_trips(
+            bytes in prop::collection::vec(any::<u8>(), 0..512),
+            text in state_text(),
+        ) {
+            let _ = serde_json::from_slice::<State>(&bytes);
+            if let Ok(st) = serde_json::from_str::<State>(&text) {
+                let again = serde_json::to_vec(&st).unwrap();
+                let back: State = serde_json::from_slice(&again).unwrap();
+                prop_assert_eq!(back, st);
+            }
+        }
+    }
+
+    proptest! {
+        /// `load` on a real file of any bytes never panics, never gives an
+        /// error for content (only for I/O), and a file it cannot read is
+        /// moved aside and replaced by the default.
+        #[test]
+        fn load_survives_any_file(bytes in prop::collection::vec(any::<u8>(), 0..512)) {
+            static RUNS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            if !crate::budget::within(&RUNS, 100) {
+                return Ok(());
+            }
+            let d = tempfile::tempdir().unwrap();
+            let p = d.path().join("state.json");
+            std::fs::write(&p, &bytes).unwrap();
+            let l = load(&p).unwrap();
+            if l.warning.is_some() {
+                prop_assert_eq!(l.state, State::default());
+                prop_assert!(!p.exists());
+            }
+        }
+    }
+
+    #[test]
+    fn nasty_state_files() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("state.json");
+        // deeply nested arrays and objects: refused by the parser, no stack overflow
+        let deep = format!("{}1{}", "[".repeat(100_000), "]".repeat(100_000));
+        std::fs::write(&p, &deep).unwrap();
+        assert!(load(&p).unwrap().warning.is_some());
+        let deep = format!("{}1{}", "{\"a\":".repeat(50_000), "}".repeat(50_000));
+        std::fs::write(&p, deep).unwrap();
+        assert!(load(&p).unwrap().warning.is_some());
+        // 10 MB of valid JSON is over the cap
+        std::fs::write(
+            &p,
+            format!("{{\"x\":\"{}\"}}", "a".repeat(10 * 1024 * 1024)),
+        )
+        .unwrap();
+        assert!(load(&p).unwrap().warning.is_some());
+        // NUL, truncation, wrong types
+        for t in [
+            &b"\0\0\0"[..],
+            br#"{"boots":-1}"#,
+            br#"{"boots":1e400}"#,
+            br#"{"account":{"name":1,"uid":"x","stage":null}}"#,
+            br#"{"account":[]}"#,
+            br#"{"format":"1"}"#,
+            br#"{"boots":4294967296}"#,
+            br#"{"account":{"name":"a","uid":4294967296,"stage":"verified"}}"#,
+        ] {
+            std::fs::write(&p, t).unwrap();
+            let l = load(&p).unwrap();
+            assert!(l.warning.is_some(), "{}", String::from_utf8_lossy(t));
+        }
+    }
+}
